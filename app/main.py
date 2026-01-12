@@ -78,6 +78,16 @@ async def startup_event():
     logger.info(f"Environment: {settings.app_env}")
     logger.info(f"Email Provider: {settings.email_provider}")
     
+    # Validate required settings
+    is_valid, missing_fields = settings.validate_required_settings()
+    if not is_valid:
+        logger.error(
+            f"Missing required environment variables: {', '.join(missing_fields)}. "
+            "Some features may not work correctly. Please set these in your deployment environment."
+        )
+    else:
+        logger.info("All required environment variables are set")
+    
     # Validate email provider configuration
     if not settings.validate_email_provider():
         logger.warning(

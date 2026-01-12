@@ -6,6 +6,7 @@ Loads and validates environment variables.
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
+import sys
 
 
 class Settings(BaseSettings):
@@ -15,17 +16,17 @@ class Settings(BaseSettings):
     app_name: str = "Mercura"
     app_env: str = "development"
     debug: bool = True
-    secret_key: str
+    secret_key: str = ""  # Allow empty for startup, validate later
     host: str = "0.0.0.0"
     port: int = int(os.getenv("PORT", "8000"))  # Use PORT from Render, fallback to 8000
     
     # Supabase
-    supabase_url: str
-    supabase_key: str
-    supabase_service_key: str
+    supabase_url: str = ""
+    supabase_key: str = ""
+    supabase_service_key: str = ""
     
     # Gemini
-    gemini_api_key: str
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
     
     # Email Provider
@@ -81,11 +82,43 @@ class Settings(BaseSettings):
         elif self.email_provider == "mailgun":
             return bool(self.mailgun_api_key and self.mailgun_webhook_secret)
         return False
+    
+    def validate_required_settings(self) -> tuple[bool, list[str]]:
+        """Validate that all required settings are present. Returns (is_valid, missing_fields)."""
+        missing = []
+        
+        if not self.secret_key:
+            missing.append("SECRET_KEY")
+        if not self.supabase_url:
+            missing.append("SUPABASE_URL")
+        if not self.supabase_key:
+            missing.append("SUPABASE_KEY")
+        if not self.supabase_service_key:
+            missing.append("SUPABASE_SERVICE_KEY")
+        if not self.gemini_api_key:
+            missing.append("GEMINI_API_KEY")
+        
+        return len(missing) == 0, missing
 
 
-# Global settings instance
-settings = Settings()
+# Global settings instance - initialize with error handling
+try:
+    settings = Settings()
+except Exception as e:
+    # If Settings initialization fails completely, create minimal settings for health check
+    print(f"Warning: Failed to load settings: {e}", file=sys.stderr)
+    # Create a minimal settings object with defaults
+    settings = Settings(
+        secret_key=os.getenv("SECRET_KEY", ""),
+        supabase_url=os.getenv("SUPABASE_URL", ""),
+        supabase_key=os.getenv("SUPABASE_KEY", ""),
+        supabase_service_key=os.getenv("SUPABASE_SERVICE_KEY", ""),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+    )
 
-# Ensure required directories exist
-os.makedirs(settings.export_temp_dir, exist_ok=True)
-os.makedirs(os.path.dirname(settings.log_file), exist_ok=True)
+# Ensure required directories exist (with error handling)
+try:
+    os.makedirs(settings.export_temp_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(settings.log_file), exist_ok=True)
+except Exception as e:
+    print(f"Warning: Failed to create directories: {e}", file=sys.stderr)
