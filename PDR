@@ -1,0 +1,600 @@
+# Product Design Reference (PDR): Automated Email-to-Data Pipeline
+
+**Product Name:** Mercura  
+**Version:** 1.0  
+**Last Updated:** January 10, 2026  
+**Status:** Implementation Complete
+
+---
+
+## 1. Executive Summary
+
+### Vision
+Provide a seamless "Email-In, Data-Out" service that automates the extraction of structured data from emails containing invoices, purchase orders, and catalogs.
+
+### Core Value Proposition
+Users forward emails (with PDF/image attachments) to a dedicated address. The system automatically:
+1. Parses the email and attachments
+2. Extracts structured data using AI
+3. Stores data in a database
+4. Enables export to CSV, Excel, or Google Sheets
+
+### Target Users
+- Accounting departments processing invoices
+- Procurement teams managing purchase orders
+- Inventory managers tracking catalogs
+- Any business receiving structured data via email
+
+---
+
+## 2. System Architecture
+
+### High-Level Flow
+
+```
+┌─────────────┐
+│   Email     │
+│  Provider   │ (SendGrid/Mailgun)
+└──────┬──────┘
+       │ Webhook POST
+       ▼
+┌─────────────┐
+│   FastAPI   │
+│   Server    │
+└──────┬──────┘
+       │
+       ├──────────────────┐
+       │                  │
+       ▼                  ▼
+┌─────────────┐    ┌─────────────┐
+│   Gemini    │    │  Supabase   │
+│  1.5 Flash  │    │ PostgreSQL  │
+│ (Extraction)│    │  (Storage)  │
+└─────────────┘    └──────┬──────┘
+                          │
+                          ▼
+                   ┌─────────────┐
+                   │   Pandas    │
+                   │  (Export)   │
+                   └─────────────┘
+```
+
+### Component Responsibilities
+
+| Component | Purpose | Technology |
+|-----------|---------|------------|
+| **Email Ingestion** | Receive and parse emails | SendGrid/Mailgun |
+| **Webhook Handler** | Authenticate and route requests | FastAPI |
+| **AI Extraction** | Extract structured data | Gemini 1.5 Flash |
+| **Data Storage** | Persist extracted data | Supabase (PostgreSQL) |
+| **Export Engine** | Generate downloadable files | Pandas |
+| **API Layer** | Expose data query endpoints | FastAPI |
+
+---
+
+## 3. Infrastructure Specifications
+
+### A. Email Handling (Ingestion)
+
+**Providers:** SendGrid Inbound Parse OR Mailgun Routes
+
+**Configuration Requirements:**
+- MX records pointed to provider
+- Webhook endpoint: `POST /webhooks/inbound-email`
+- HTTPS with valid SSL certificate
+- Signature verification enabled
+
+**Responsibilities:**
+1. Receive raw MIME email
+2. Parse into JSON with sender, subject, body, attachments
+3. Handle multipart form-data for attachments
+4. Forward to application webhook
+
+**Security:**
+- HMAC signature verification (SendGrid: SHA256, Mailgun: SHA256)
+- Reject unsigned requests
+- Rate limiting at provider level
+
+### B. Extraction Engine (Intelligence)
+
+**Tool:** Google Gemini 1.5 Flash API
+
+**Why Gemini 1.5 Flash:**
+- Low latency (< 2 seconds for most documents)
+- Large context window (1M tokens)
+- Cost-effective for high-volume processing
+- Native support for PDF and image inputs
+
+**Implementation:**
+```python
+Input: Email body + Base64 encoded attachments
+System Prompt: "Extract structured JSON matching schema..."
+Output: Clean JSON with line items
+```
+
+**Extraction Schema:**
+```json
+{
+  "line_items": [
+    {
+      "item_name": "string",
+      "sku": "string",
+      "description": "string",
+      "quantity": "integer",
+      "unit_price": "float",
+      "total_price": "float"
+    }
+  ],
+  "metadata": {
+    "document_type": "invoice|purchase_order|catalog",
+    "document_number": "string",
+    "date": "ISO 8601",
+    "vendor": "string",
+    "total_amount": "float",
+    "currency": "string"
+  }
+}
+```
+
+**Priority Logic:**
+- If email has both body text and PDF: prioritize PDF for line items
+- Use body text for context (e.g., "Urgent order")
+- Process multiple attachments sequentially
+
+### C. Database (Persistence)
+
+**Tool:** Supabase (PostgreSQL)
+
+**Schema Design:**
+
+```sql
+-- Users table
+users (
+  id UUID PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  company_name TEXT,
+  api_key TEXT UNIQUE,
+  email_quota_per_day INTEGER DEFAULT 1000,
+  emails_processed_today INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)
+
+-- Inbound emails table
+inbound_emails (
+  id UUID PRIMARY KEY,
+  sender_email TEXT NOT NULL,
+  subject_line TEXT,
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT CHECK (status IN ('pending', 'processing', 'processed', 'failed')),
+  error_message TEXT,
+  has_attachments BOOLEAN DEFAULT FALSE,
+  attachment_count INTEGER DEFAULT 0,
+  user_id UUID REFERENCES users(id)
+)
+
+-- Line items table
+line_items (
+  id UUID PRIMARY KEY,
+  email_id UUID REFERENCES inbound_emails(id) ON DELETE CASCADE,
+  item_name TEXT,
+  sku TEXT,
+  description TEXT,
+  quantity INTEGER,
+  unit_price NUMERIC(10, 2),
+  total_price NUMERIC(10, 2),
+  confidence_score FLOAT,
+  extracted_at TIMESTAMPTZ DEFAULT NOW(),
+  metadata JSONB
+)
+
+-- Catalogs table (for validation)
+catalogs (
+  id UUID PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  sku TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  expected_price NUMERIC(10, 2),
+  category TEXT,
+  supplier TEXT,
+  last_updated TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, sku)
+)
+```
+
+**Indexes:**
+- `idx_inbound_emails_sender` on `sender_email`
+- `idx_inbound_emails_status` on `status`
+- `idx_line_items_email_id` on `email_id`
+- `idx_line_items_sku` on `sku`
+
+**Row-Level Security:**
+- Users can only access their own data
+- Service role bypasses RLS for webhook processing
+
+### D. File Generation & Export (Output)
+
+**Tool:** Python + Pandas
+
+**Export Formats:**
+
+1. **CSV**
+   - UTF-8 encoding
+   - Comma-separated
+   - Header row included
+   - Currency formatted as `$X.XX`
+
+2. **Excel (.xlsx)**
+   - Formatted headers (blue background, white text)
+   - Auto-adjusted column widths
+   - Currency cells formatted
+   - Single worksheet named "Data"
+
+3. **Google Sheets**
+   - OAuth2 service account authentication
+   - Update existing sheet by ID
+   - Formatted header row
+   - Real-time sync capability
+
+---
+
+## 4. Data Processing Logic
+
+### Step 1: The "Handshake" (Webhook)
+
+```python
+1. Receive POST request from email provider
+2. Verify HMAC signature
+3. Check sender is authorized user in database
+4. Validate user is active and within quota
+5. Create inbound_email record with status='pending'
+6. Return 200 OK immediately (async processing)
+7. Queue email for processing
+```
+
+**Error Handling:**
+- Invalid signature → 401 Unauthorized
+- Unknown sender → 403 Forbidden
+- Quota exceeded → 429 Too Many Requests
+- Server error → 500 Internal Server Error
+
+### Step 2: The "Flash" (Gemini Processing)
+
+```python
+1. Update email status to 'processing'
+2. Download attachments from temporary URLs
+3. For each attachment:
+   a. Determine type (PDF/PNG/JPG)
+   b. Encode as Base64 if needed
+   c. Construct Gemini prompt with schema
+   d. Send to Gemini 1.5 Flash API
+   e. Parse JSON response
+4. If no attachments, process email body text
+5. Aggregate all extraction results
+```
+
+**Prompt Engineering:**
+```
+You are a precise data extraction engine.
+Output ONLY valid JSON matching this schema...
+[schema]
+Do not include markdown or explanations.
+For currency: "$1,200.00" → 1200.00
+For dates: use ISO format (YYYY-MM-DD)
+```
+
+**Confidence Scoring:**
+```python
+confidence = (filled_required_fields / total_required_fields)
+Required fields: item_name, quantity, unit_price, total_price
+```
+
+### Step 3: The "Transformation" (Pandas)
+
+```python
+1. Load Gemini JSON into Python dict
+2. Sanitize data:
+   - Convert currency strings to floats
+   - Standardize dates to ISO format
+   - Remove null/empty items
+3. Add confidence_score to each item
+4. Insert line_items into Supabase
+5. Update email status to 'processed' or 'failed'
+6. Increment user's daily email count
+```
+
+**Data Sanitization:**
+- `"$1,200.00"` → `1200.00`
+- `"Jan 10, 2024"` → `"2024-01-10"`
+- `null` quantities → skip item
+- Negative prices → flag for review
+
+---
+
+## 5. API Endpoints
+
+### Webhooks
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/webhooks/inbound-email` | POST | Receive emails from providers |
+| `/webhooks/health` | GET | Health check for webhook |
+
+### Data Queries
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/data/emails` | GET | List all emails with filters |
+| `/data/emails/{id}` | GET | Get email details + line items |
+| `/data/line-items` | GET | Query line items by date/email |
+| `/data/stats` | GET | Processing statistics |
+
+### Exports
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/export/csv` | POST | Download CSV file |
+| `/export/excel` | POST | Download Excel file |
+| `/export/google-sheets` | POST | Sync to Google Sheets |
+
+### System
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | API information |
+| `/health` | GET | System health check |
+| `/docs` | GET | Interactive API documentation |
+
+---
+
+## 6. Development Roadmap
+
+### Phase 1: Core Processing ✅ COMPLETE
+- [x] FastAPI application setup
+- [x] Supabase database schema
+- [x] Gemini 1.5 Flash integration
+- [x] Webhook handlers (SendGrid + Mailgun)
+- [x] Email processing pipeline
+- [x] Line item extraction and storage
+
+### Phase 2: Export & Querying ✅ COMPLETE
+- [x] CSV export with Pandas
+- [x] Excel export with formatting
+- [x] Google Sheets integration
+- [x] Data query endpoints
+- [x] Statistics endpoint
+
+### Phase 3: Production Readiness (NEXT)
+- [ ] User authentication (API keys)
+- [ ] Rate limiting middleware
+- [ ] Error recovery and retry logic
+- [ ] Monitoring and alerting
+- [ ] Comprehensive logging
+- [ ] Unit and integration tests
+
+### Phase 4: Advanced Features (FUTURE)
+- [ ] Catalog validation (compare extracted vs. expected prices)
+- [ ] Multi-tenant support
+- [ ] Web dashboard UI
+- [ ] Email templates for confirmations
+- [ ] Duplicate detection
+- [ ] Custom extraction schemas per user
+
+---
+
+## 7. Configuration Guide
+
+### Environment Variables
+
+**Required:**
+```env
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=eyJxxx
+SUPABASE_SERVICE_KEY=eyJxxx
+GEMINI_API_KEY=AIzaxxx
+EMAIL_PROVIDER=sendgrid
+SENDGRID_WEBHOOK_SECRET=xxx
+```
+
+**Optional:**
+```env
+MAX_ATTACHMENT_SIZE_MB=25
+ALLOWED_ATTACHMENT_TYPES=pdf,png,jpg,jpeg
+CONFIDENCE_THRESHOLD=0.7
+RATE_LIMIT_PER_MINUTE=60
+LOG_LEVEL=INFO
+```
+
+### Email Provider Setup
+
+**SendGrid:**
+1. Add domain to Inbound Parse
+2. Configure MX records
+3. Set webhook URL
+4. Copy webhook verification key
+
+**Mailgun:**
+1. Add domain to Mailgun
+2. Create route for inbound emails
+3. Set forward URL to webhook
+4. Copy webhook signing key
+
+---
+
+## 8. Testing Strategy
+
+### Unit Tests
+- Gemini extraction with sample invoices
+- Database CRUD operations
+- Export formatting
+
+### Integration Tests
+- End-to-end email processing
+- Webhook signature verification
+- Multi-attachment handling
+
+### Load Tests
+- 100 concurrent webhook requests
+- Large PDF processing (10MB+)
+- 10,000 line items export
+
+### Test Data
+```
+tests/
+  fixtures/
+    invoice_sample.pdf
+    purchase_order.pdf
+    catalog_image.png
+    test_email.json
+```
+
+---
+
+## 9. Security Considerations
+
+### Authentication
+- Webhook signature verification (HMAC-SHA256)
+- API key authentication for data endpoints
+- Service account for Google Sheets
+
+### Authorization
+- Row-level security in Supabase
+- User can only access their own data
+- Admin role for support access
+
+### Data Protection
+- HTTPS only (TLS 1.2+)
+- Environment variables for secrets
+- No sensitive data in logs
+- Automatic PII redaction
+
+### Rate Limiting
+- 60 requests/minute per user
+- 1000 emails/day per user
+- Exponential backoff for retries
+
+---
+
+## 10. Monitoring & Observability
+
+### Metrics to Track
+- Emails processed per hour
+- Average extraction time
+- Confidence score distribution
+- Error rate by type
+- Export requests per day
+
+### Logging
+- Structured JSON logs
+- Log levels: DEBUG, INFO, WARNING, ERROR
+- Rotation: 500MB per file, 10-day retention
+- Sensitive data redaction
+
+### Alerts
+- Webhook downtime > 5 minutes
+- Error rate > 5%
+- Gemini API quota exceeded
+- Database connection failures
+
+---
+
+## 11. Success Criteria
+
+### Performance
+- ✅ Email processing < 10 seconds (95th percentile)
+- ✅ Gemini extraction < 3 seconds per document
+- ✅ Export generation < 5 seconds for 1000 items
+
+### Accuracy
+- ✅ Extraction confidence > 85% average
+- ✅ < 2% data corruption rate
+- ✅ Currency formatting 100% accurate
+
+### Reliability
+- ✅ 99.9% uptime for webhook endpoint
+- ✅ Zero data loss
+- ✅ Automatic retry for transient failures
+
+### Usability
+- ✅ Zero-configuration email forwarding
+- ✅ One-click export to Excel
+- ✅ Real-time Google Sheets sync
+
+---
+
+## 12. Known Limitations
+
+1. **Attachment Size:** Max 25MB per attachment (provider limit)
+2. **File Types:** Only PDF, PNG, JPG supported
+3. **Extraction Accuracy:** Depends on document quality
+4. **Google Sheets:** Requires manual OAuth setup
+5. **Multi-page PDFs:** Processed as single document
+
+---
+
+## 13. Future Enhancements
+
+1. **OCR Preprocessing:** Improve image quality before extraction
+2. **Custom Templates:** User-defined extraction schemas
+3. **Duplicate Detection:** Prevent re-processing same invoice
+4. **Email Confirmations:** Send summary after processing
+5. **Web Dashboard:** Visual interface for data management
+6. **Batch Processing:** Upload multiple files via UI
+7. **Webhook Replay:** Reprocess failed emails
+8. **Data Validation:** Flag anomalies (price changes, missing SKUs)
+
+---
+
+## 14. Appendix
+
+### A. Sample Email Payload (SendGrid)
+
+```json
+{
+  "from": "vendor@example.com",
+  "to": "invoices@inbound.yourdomain.com",
+  "subject": "Invoice #12345",
+  "text": "Please find attached invoice...",
+  "attachments": "1",
+  "attachment1": "<file_object>"
+}
+```
+
+### B. Sample Gemini Response
+
+```json
+{
+  "line_items": [
+    {
+      "item_name": "Widget A",
+      "sku": "WID-001",
+      "quantity": 10,
+      "unit_price": 25.00,
+      "total_price": 250.00
+    }
+  ],
+  "metadata": {
+    "document_type": "invoice",
+    "document_number": "INV-12345",
+    "date": "2024-01-10",
+    "vendor": "Acme Corp",
+    "total_amount": 250.00,
+    "currency": "USD"
+  }
+}
+```
+
+### C. Export Sample (CSV)
+
+```csv
+Item Name,SKU,Description,Quantity,Unit Price,Total Price,Confidence
+Widget A,WID-001,Standard widget,10,$25.00,$250.00,95.0%
+Gadget B,GAD-002,Premium gadget,5,$50.00,$250.00,92.0%
+```
+
+---
+
+**Document Version:** 1.0  
+**Last Review:** January 10, 2026  
+**Next Review:** February 10, 2026  
+**Owner:** Development Team

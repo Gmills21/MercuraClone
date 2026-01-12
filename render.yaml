@@ -1,0 +1,77 @@
+services:
+  # Web Service for FastAPI application
+  - type: web
+    name: mercura-api
+    runtime: python
+    plan: starter  # Can upgrade to standard/pro for production
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Application Settings
+      - key: APP_NAME
+        value: Mercura
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: HOST
+        value: 0.0.0.0
+      # PORT is automatically provided by Render, no need to set it
+      
+      # Logging
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FILE
+        value: ./logs/mercura.log
+      
+      # Supabase - Set these manually in Render Dashboard
+      # These are sensitive values that should be set in the dashboard
+      # SUPABASE_URL - Set in dashboard
+      # SUPABASE_KEY - Set in dashboard  
+      # SUPABASE_SERVICE_KEY - Set in dashboard
+      
+      # Gemini AI - Set manually in Render Dashboard
+      # GEMINI_API_KEY - Set in dashboard
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      
+      # Email Provider
+      - key: EMAIL_PROVIDER
+        value: sendgrid  # or mailgun
+      
+      # SendGrid - Set these manually in Render Dashboard if using SendGrid
+      # SENDGRID_WEBHOOK_SECRET - Set in dashboard
+      # SENDGRID_INBOUND_DOMAIN - Set in dashboard
+      
+      # Mailgun - Set these manually in Render Dashboard if using Mailgun
+      # MAILGUN_API_KEY - Set in dashboard
+      # MAILGUN_WEBHOOK_SECRET - Set in dashboard
+      # MAILGUN_DOMAIN - Set in dashboard
+      
+      # Export Settings
+      - key: MAX_EXPORT_ROWS
+        value: "10000"
+      - key: EXPORT_TEMP_DIR
+        value: ./temp/exports
+      
+      # Processing Settings
+      - key: MAX_ATTACHMENT_SIZE_MB
+        value: "25"
+      - key: ALLOWED_ATTACHMENT_TYPES
+        value: pdf,png,jpg,jpeg
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.7"
+      
+      # Rate Limiting
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: RATE_LIMIT_PER_HOUR
+        value: "1000"
+    
+    # Health check endpoint
+    healthCheckPath: /health
+    
+    # Auto-deploy from git
+    autoDeploy: true
