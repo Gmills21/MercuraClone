@@ -4,7 +4,7 @@ Loads and validates environment variables.
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List, Tuple
 import os
 import sys
 
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     
     # Gemini
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     
     # Email Provider
     email_provider: str = "sendgrid"  # sendgrid or mailgun
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         case_sensitive = False
     
     @property
-    def allowed_extensions(self) -> list[str]:
+    def allowed_extensions(self) -> List[str]:
         """Get list of allowed file extensions."""
         return self.allowed_attachment_types.split(",")
     
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
             return bool(self.mailgun_api_key and self.mailgun_webhook_secret)
         return False
     
-    def validate_required_settings(self) -> tuple[bool, list[str]]:
+    def validate_required_settings(self) -> Tuple[bool, List[str]]:
         """Validate that all required settings are present. Returns (is_valid, missing_fields)."""
         missing = []
         

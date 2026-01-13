@@ -22,7 +22,8 @@ class GeminiService:
     
     def __init__(self):
         """Initialize Gemini model."""
-        self.model = genai.GenerativeModel(settings.gemini_model)
+        print(f"Gemini model from settings: {settings.gemini_model}")
+        self.model = genai.GenerativeModel(model_name=settings.gemini_model)
         
         # Default extraction schema for invoices/purchase orders
         self.default_schema = {

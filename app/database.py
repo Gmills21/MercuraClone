@@ -231,6 +231,126 @@ class Database:
             logger.error(f"Error upserting catalog item: {e}")
             raise
 
+    # ==================== CUSTOMERS ====================
+
+    async def create_customer(self, customer: Any) -> str:
+        """Create a new customer."""
+        try:
+            data = customer.model_dump(exclude={'id'}, exclude_none=True)
+            result = self.admin_client.table('customers').insert(data).execute()
+            return result.data[0]['id']
+        except Exception as e:
+            logger.error(f"Error creating customer: {e}")
+            raise
+
+    async def get_customers(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get all customers for a user."""
+        try:
+            result = self.admin_client.table('customers')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error fetching customers: {e}")
+            return []
+
+    # ==================== QUOTES ====================
+
+    async def create_quote(self, quote: Any) -> str:
+        """Create a new quote and its items."""
+        try:
+            # 1. Create Quote
+            quote_data = quote.model_dump(exclude={'id', 'items'}, exclude_none=True)
+            result = self.admin_client.table('quotes').insert(quote_data).execute()
+            quote_id = result.data[0]['id']
+
+            # 2. Create Quote Items
+            if quote.items:
+                items_data = []
+                for item in quote.items:
+                    data = item.model_dump(exclude={'id'}, exclude_none=True)
+                    data['quote_id'] = quote_id
+                    items_data.append(data)
+                
+                self.admin_client.table('quote_items').insert(items_data).execute()
+            
+            return quote_id
+        except Exception as e:
+            logger.error(f"Error creating quote: {e}")
+            raise
+
+    async def get_quote(self, quote_id: str) -> Optional[Dict[str, Any]]:
+        """Get quote with items."""
+        try:
+            # Fetch quote
+            quote_result = self.admin_client.table('quotes')\
+                .select('*, customers(name, email)')\
+                .eq('id', quote_id)\
+                .execute()
+            
+            if not quote_result.data:
+                return None
+            
+            quote = quote_result.data[0]
+
+            # Fetch items
+            items_result = self.admin_client.table('quote_items')\
+                .select('*')\
+                .eq('quote_id', quote_id)\
+                .execute()
+            
+            quote['items'] = items_result.data
+            return quote
+        except Exception as e:
+            logger.error(f"Error fetching quote: {e}")
+            return None
+
+    async def list_quotes(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """List quotes for a user."""
+        try:
+            result = self.admin_client.table('quotes')\
+                .select('*, customers(name)')\
+                .eq('user_id', user_id)\
+                .order('created_at', desc=True)\
+                .limit(limit)\
+                .execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error listing quotes: {e}")
+            return []
+
+    async def update_quote_status(self, quote_id: str, status: str) -> None:
+        """Update quote status."""
+        try:
+            self.admin_client.table('quotes')\
+                .update({'status': status, 'updated_at': datetime.utcnow().isoformat()})\
+                .eq('id', quote_id)\
+                .execute()
+        except Exception as e:
+            logger.error(f"Error updating quote status: {e}")
+            raise
+
+    # ==================== SEARCH ====================
+
+    async def search_catalog(self, user_id: str, query: str) -> List[Dict[str, Any]]:
+        """Search catalog by item_name or sku using ILIKE."""
+        try:
+            # Perform a simple OR search on SKU and Item Name
+            # Note: Supabase/PostgREST syntax for OR is a bit specific: .or_('sku.ilike.%q%,item_name.ilike.%q%')
+            filter_str = f"sku.ilike.%{query}%,item_name.ilike.%{query}%"
+            
+            result = self.admin_client.table('catalogs')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .or_(filter_str)\
+                .limit(20)\
+                .execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error searching catalog: {e}")
+            return []
 
 # Global database instance
 # Initialize immediately but handle errors gracefully

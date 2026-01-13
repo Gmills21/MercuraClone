@@ -119,6 +119,68 @@ class Catalog(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+
+class QuoteStatus(str, Enum):
+    """Status of a quote."""
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class Customer(BaseModel):
+    """Customer model."""
+    id: Optional[str] = None
+    user_id: str
+    name: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    address: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class QuoteItem(BaseModel):
+    """Item within a quote."""
+    id: Optional[str] = None
+    quote_id: str
+    product_id: Optional[str] = None
+    sku: Optional[str] = None
+    description: str
+    quantity: int = 1
+    unit_price: float
+    total_price: float
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class Quote(BaseModel):
+    """Quote/Estimate model."""
+    id: Optional[str] = None
+    user_id: str
+    customer_id: Optional[str] = None
+    quote_number: str
+    status: QuoteStatus = QuoteStatus.DRAFT
+    total_amount: float = 0.0
+    valid_until: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    items: List[QuoteItem] = []
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class QuoteTemplate(BaseModel):
+    """Template for quotes."""
+    id: Optional[str] = None
+    user_id: str
+    name: str
+    description: Optional[str] = None
+    default_items: List[Dict[str, Any]] = []
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 # SQL Schema for Supabase initialization
 SUPABASE_SCHEMA = """
 -- Enable UUID extension
@@ -166,7 +228,7 @@ CREATE TABLE IF NOT EXISTS line_items (
     metadata JSONB
 );
 
--- Catalogs table
+-- Catalogs table (Products)
 CREATE TABLE IF NOT EXISTS catalogs (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -180,6 +242,56 @@ CREATE TABLE IF NOT EXISTS catalogs (
     UNIQUE(user_id, sku)
 );
 
+-- Customers table
+CREATE TABLE IF NOT EXISTS customers (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    company TEXT,
+    address TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB
+);
+
+-- Quotes table
+CREATE TABLE IF NOT EXISTS quotes (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+    quote_number TEXT NOT NULL,
+    status TEXT DEFAULT 'draft',
+    total_amount NUMERIC(10, 2) DEFAULT 0.00,
+    valid_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB
+);
+
+-- Quote Items table
+CREATE TABLE IF NOT EXISTS quote_items (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    quote_id UUID REFERENCES quotes(id) ON DELETE CASCADE,
+    product_id UUID REFERENCES catalogs(id) ON DELETE SET NULL,
+    sku TEXT,
+    description TEXT,
+    quantity INTEGER DEFAULT 1,
+    unit_price NUMERIC(10, 2),
+    total_price NUMERIC(10, 2),
+    metadata JSONB
+);
+
+-- Quote Templates table
+CREATE TABLE IF NOT EXISTS quote_templates (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    default_items JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_inbound_emails_sender ON inbound_emails(sender_email);
 CREATE INDEX IF NOT EXISTS idx_inbound_emails_status ON inbound_emails(status);
@@ -187,18 +299,30 @@ CREATE INDEX IF NOT EXISTS idx_inbound_emails_received_at ON inbound_emails(rece
 CREATE INDEX IF NOT EXISTS idx_line_items_email_id ON line_items(email_id);
 CREATE INDEX IF NOT EXISTS idx_line_items_sku ON line_items(sku);
 CREATE INDEX IF NOT EXISTS idx_catalogs_user_sku ON catalogs(user_id, sku);
+CREATE INDEX IF NOT EXISTS idx_quotes_user ON quotes(user_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_customer ON quotes(customer_id);
 
 -- Row Level Security (RLS)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_emails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE line_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE catalogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quotes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quote_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quote_templates ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies (basic - customize based on auth strategy)
+-- RLS Policies
 CREATE POLICY users_select_own ON users FOR SELECT USING (auth.uid() = id);
 CREATE POLICY inbound_emails_select_own ON inbound_emails FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY line_items_select_own ON line_items FOR SELECT USING (
     email_id IN (SELECT id FROM inbound_emails WHERE user_id = auth.uid())
 );
 CREATE POLICY catalogs_all_own ON catalogs FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY customers_all_own ON customers FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY quotes_all_own ON quotes FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY quote_items_all_own ON quote_items FOR ALL USING (
+    quote_id IN (SELECT id FROM quotes WHERE user_id = auth.uid())
+);
+CREATE POLICY quote_templates_all_own ON quote_templates FOR ALL USING (auth.uid() = user_id);
 """

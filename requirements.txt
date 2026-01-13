@@ -4,14 +4,14 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
 # Database
-supabase>=2.8.0
-psycopg2-binary==2.9.9
+supabase==2.6.0
+# psycopg2-binary==2.9.9  # Not needed - Supabase client handles connections
 
 # AI/ML
 google-generativeai
 
 # Data Processing
-pandas==2.2.0
+pandas>=2.2.0
 openpyxl==3.1.2
 xlsxwriter==3.1.9
 
@@ -31,7 +31,7 @@ requests==2.31.0
 
 # Utilities
 python-dotenv==1.0.0
-pydantic==2.5.3
+pydantic>=2.10.0
 pydantic-settings==2.1.0
 
 # Date/Time

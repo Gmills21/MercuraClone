@@ -5,7 +5,7 @@ Main FastAPI application for Mercura.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routes import webhooks, export, data
+from app.routes import webhooks, export, data, quotes, customers, products
 from loguru import logger
 import sys
 
@@ -46,6 +46,9 @@ app.add_middleware(
 app.include_router(webhooks.router)
 app.include_router(export.router)
 app.include_router(data.router)
+app.include_router(quotes.router)
+app.include_router(customers.router)
+app.include_router(products.router)
 
 
 @app.get("/")
