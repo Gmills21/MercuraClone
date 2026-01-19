@@ -18,14 +18,39 @@ export const quotesApi = {
     list: (limit = 50) => api.get(`/quotes?limit=${limit}`),
     get: (id: string) => api.get(`/quotes/${id}`),
     create: (data: any) => api.post('/quotes/', data),
+    update: (id: string, data: any) => api.put(`/quotes/${id}`, data),
     updateStatus: (id: string, status: string) => api.patch(`/quotes/${id}/status?status=${status}`),
 };
 
 export const productsApi = {
     search: (query: string) => api.get(`/products/search?query=${query}`),
+    upload: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/products/upload', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+    },
+    uploadCompetitorMap: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/products/competitor-maps/upload', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+    },
+    suggest: (items: any[]) => api.post('/products/suggest', { items }),
 };
 
 export const customersApi = {
     list: (limit = 100) => api.get(`/customers?limit=${limit}`),
     create: (data: any) => api.post('/customers/', data),
+};
+
+export const emailsApi = {
+    list: (status?: string, limit = 50) => api.get(`/data/emails?limit=${limit}${status ? `&status=${status}` : ''}`),
+    get: (id: string) => api.get(`/data/emails/${id}`),
 };

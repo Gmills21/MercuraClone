@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { quotesApi } from '../services/api';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { FileText, Plus, Search } from 'lucide-react';
 
 export const Quotes = () => {
+    const navigate = useNavigate();
     const [quotes, setQuotes] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -52,7 +53,11 @@ export const Quotes = () => {
                                 <tr><td colSpan={5} className="text-center py-8 text-slate-500">No quotes found.</td></tr>
                             ) : (
                                 quotes.map((quote) => (
-                                    <tr key={quote.id} className="group hover:bg-slate-800/30 transition-colors cursor-pointer">
+                                    <tr 
+                                        key={quote.id} 
+                                        onClick={() => navigate(`/quotes/${quote.id}`)}
+                                        className="group hover:bg-slate-800/30 transition-colors cursor-pointer"
+                                    >
                                         <td className="px-6 py-4 font-medium text-white">{quote.quote_number}</td>
                                         <td className="px-6 py-4 text-slate-300">{quote.customers?.name || 'Unknown'}</td>
                                         <td className="px-6 py-4 text-white font-medium">${quote.total_amount}</td>

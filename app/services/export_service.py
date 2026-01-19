@@ -132,6 +132,98 @@ class ExportService:
         except Exception as e:
             logger.error(f"Excel export error: {e}")
             raise
+
+    async def export_quote_to_excel(
+        self,
+        quote: Dict[str, Any]
+    ) -> str:
+        """
+        Export a quote to a formatted Excel file.
+        
+        Returns: Path to generated Excel file
+        """
+        try:
+            # Generate filename
+            quote_number = quote.get('quote_number', 'draft')
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"Quote_{quote_number}_{timestamp}.xlsx"
+            filepath = os.path.join(settings.export_temp_dir, filename)
+            
+            # Create Excel writer
+            with pd.ExcelWriter(filepath, engine='xlsxwriter') as writer:
+                workbook = writer.book
+                worksheet = workbook.add_worksheet('Quote')
+                
+                # Formats
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'font_size': 20,
+                    'align': 'center'
+                })
+                subheader_format = workbook.add_format({
+                    'bold': True,
+                    'font_size': 12,
+                    'bottom': 1
+                })
+                currency_format = workbook.add_format({'num_format': '$#,##0.00'})
+                date_format = workbook.add_format({'num_format': 'yyyy-mm-dd'})
+                
+                # Company Header (Placeholder for now, could be User's company)
+                worksheet.merge_range('A1:E1', 'QUOTATION', header_format)
+                
+                # Quote Details
+                worksheet.write('A3', 'Quote Number:', subheader_format)
+                worksheet.write('B3', quote.get('quote_number'))
+                
+                worksheet.write('D3', 'Date:', subheader_format)
+                created_at = quote.get('created_at')
+                if isinstance(created_at, str):
+                    try:
+                        created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00')).date()
+                    except:
+                        pass
+                worksheet.write('E3', created_at, date_format)
+                
+                # Customer Details
+                customer = quote.get('customers') or {}
+                worksheet.write('A5', 'To:', subheader_format)
+                worksheet.write('A6', customer.get('name', 'N/A'))
+                if customer.get('email'):
+                    worksheet.write('A7', customer.get('email'))
+                
+                # Items Table Header
+                headers = ['Item', 'Description', 'Quantity', 'Unit Price', 'Total']
+                for col_num, header in enumerate(headers):
+                    worksheet.write(9, col_num, header, subheader_format)
+                
+                # Items Data
+                items = quote.get('items', [])
+                row = 10
+                for item in items:
+                    worksheet.write(row, 0, item.get('sku', ''))
+                    worksheet.write(row, 1, item.get('description', ''))
+                    worksheet.write(row, 2, item.get('quantity', 0))
+                    worksheet.write(row, 3, item.get('unit_price', 0), currency_format)
+                    worksheet.write(row, 4, item.get('total_price', 0), currency_format)
+                    row += 1
+                
+                # Total
+                row += 1
+                worksheet.write(row, 3, 'Total:', subheader_format)
+                worksheet.write(row, 4, quote.get('total_amount', 0), currency_format)
+                
+                # Adjust column widths
+                worksheet.set_column('A:A', 15)
+                worksheet.set_column('B:B', 40) # Description
+                worksheet.set_column('C:C', 10)
+                worksheet.set_column('D:E', 15)
+            
+            logger.info(f"Quote export created: {filepath}")
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Quote export error: {e}")
+            raise
     
     async def export_to_google_sheets(
         self,

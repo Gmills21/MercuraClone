@@ -77,6 +77,18 @@ class Database:
             logger.error(f"Error fetching email: {e}")
             return None
     
+    async def get_email_by_message_id(self, message_id: str) -> Optional[Dict[str, Any]]:
+        """Get email by Message-ID."""
+        try:
+            result = self.admin_client.table('inbound_emails')\
+                .select('*')\
+                .eq('message_id', message_id)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching email by message_id: {e}")
+            return None
+    
     async def get_emails_by_status(
         self, 
         status: str, 
@@ -215,6 +227,21 @@ class Database:
         except Exception as e:
             logger.error(f"Error fetching catalog item: {e}")
             return None
+
+    async def get_catalog_item_by_id(
+        self, 
+        item_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get catalog item by ID."""
+        try:
+            result = self.admin_client.table('catalogs')\
+                .select('*')\
+                .eq('id', item_id)\
+                .execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching catalog item by ID: {e}")
+            return None
     
     async def upsert_catalog_item(
         self, 
@@ -230,6 +257,71 @@ class Database:
         except Exception as e:
             logger.error(f"Error upserting catalog item: {e}")
             raise
+
+    async def bulk_upsert_catalog(
+        self,
+        catalogs: List[Catalog]
+    ) -> int:
+        """Bulk insert or update catalog items."""
+        try:
+            if not catalogs:
+                return 0
+            
+            data = [
+                c.model_dump(exclude={'id'}, exclude_none=True)
+                for c in catalogs
+            ]
+            
+            # Supabase upsert handles bulk
+            result = self.admin_client.table('catalogs')\
+                .upsert(data, on_conflict='user_id,sku')\
+                .execute()
+                
+            return len(result.data)
+        except Exception as e:
+            logger.error(f"Error bulk upserting catalog: {e}")
+            raise
+
+    async def upsert_competitor_map(
+        self,
+        maps: List[Any]
+    ) -> int:
+        """Bulk insert or update competitor maps."""
+        try:
+            if not maps:
+                return 0
+            
+            data = [
+                m.model_dump(exclude={'id'}, exclude_none=True)
+                for m in maps
+            ]
+            
+            result = self.admin_client.table('competitor_maps')\
+                .upsert(data, on_conflict='user_id,competitor_sku')\
+                .execute()
+                
+            return len(result.data)
+        except Exception as e:
+            logger.error(f"Error upserting competitor maps: {e}")
+            raise
+
+    async def get_competitor_map(
+        self, 
+        user_id: str, 
+        competitor_sku: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get competitor map for a SKU."""
+        try:
+            result = self.admin_client.table('competitor_maps')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .eq('competitor_sku', competitor_sku)\
+                .execute()
+            
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching competitor map: {e}")
+            return None
 
     # ==================== CUSTOMERS ====================
 
@@ -286,7 +378,7 @@ class Database:
         try:
             # Fetch quote
             quote_result = self.admin_client.table('quotes')\
-                .select('*, customers(name, email)')\
+                .select('*, customers(name, email), inbound_emails(subject_line, sender_email)')\
                 .eq('id', quote_id)\
                 .execute()
             
@@ -332,6 +424,43 @@ class Database:
             logger.error(f"Error updating quote status: {e}")
             raise
 
+    async def update_quote(self, quote_id: str, quote_data: Dict[str, Any], items: List[Dict[str, Any]]) -> None:
+        """Update quote and its items."""
+        try:
+            # 1. Update Quote fields
+            if quote_data:
+                quote_data['updated_at'] = datetime.utcnow().isoformat()
+                self.admin_client.table('quotes')\
+                    .update(quote_data)\
+                    .eq('id', quote_id)\
+                    .execute()
+            
+            # 2. Update Items
+            # Strategy: Delete all existing items and recreate them.
+            if items is not None:
+                # Delete existing
+                self.admin_client.table('quote_items')\
+                    .delete()\
+                    .eq('quote_id', quote_id)\
+                    .execute()
+                
+                # Create new
+                if items:
+                    items_to_insert = []
+                    for item in items:
+                        # Ensure quote_id is set
+                        item['quote_id'] = quote_id
+                        # Remove id if it's present (let DB generate new ones)
+                        if 'id' in item:
+                            del item['id']
+                        items_to_insert.append(item)
+                    
+                    self.admin_client.table('quote_items').insert(items_to_insert).execute()
+                    
+        except Exception as e:
+            logger.error(f"Error updating quote: {e}")
+            raise
+
     # ==================== SEARCH ====================
 
     async def search_catalog(self, user_id: str, query: str) -> List[Dict[str, Any]]:
@@ -348,8 +477,29 @@ class Database:
                 .limit(20)\
                 .execute()
             return result.data
+
+    async def search_catalog_vector(
+        self, 
+        user_id: str, 
+        embedding: List[float], 
+        limit: int = 5,
+        threshold: float = 0.7
+    ) -> List[Dict[str, Any]]:
+        """Search catalog using vector similarity."""
+        try:
+            # Call RPC function for vector search
+            # Note: You need to create this function in Supabase
+            params = {
+                'query_embedding': embedding,
+                'match_threshold': threshold,
+                'match_count': limit,
+                'filter_user_id': user_id
+            }
+            
+            result = self.admin_client.rpc('match_catalogs', params).execute()
+            return result.data
         except Exception as e:
-            logger.error(f"Error searching catalog: {e}")
+            logger.error(f"Error vector searching catalog: {e}")
             return []
 
 # Global database instance

@@ -8,6 +8,7 @@ Mercura Clone/
 ├── 📄 PROJECT_SUMMARY.md             # Implementation status and summary
 ├── 📄 PDR                            # Product Design Reference (complete spec)
 ├── 📄 DEPLOYMENT_CHECKLIST.md        # Production deployment guide
+├── 📄 FutureDevelopmentPlans.md      # Roadmap and deferred features
 ├── 📄 requirements.txt               # Python dependencies
 ├── 📄 .env.example                   # Environment variable template
 ├── 📄 .gitignore                     # Git exclusions
@@ -74,6 +75,7 @@ Mercura Clone/
 | `PROJECT_SUMMARY.md` | Implementation status and architecture | ~12 KB |
 | `PDR` | Complete product design reference | ~16 KB |
 | `DEPLOYMENT_CHECKLIST.md` | Production deployment guide | ~10 KB |
+| `FutureDevelopmentPlans.md` | Roadmap and deferred features | ~2 KB |
 
 ### Application Core
 

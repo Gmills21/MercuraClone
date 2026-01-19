@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Users, ShoppingBag, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, ShoppingBag, Settings, LogOut, Inbox } from 'lucide-react';
 import clsx from 'clsx';
 
 const SidebarItem = ({ icon: Icon, label, to }: { icon: any, label: string, to: string }) => {
@@ -41,9 +41,11 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
 
                     <nav className="space-y-1">
                         <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" />
+                        <SidebarItem icon={Inbox} label="Inbox" to="/emails" />
                         <SidebarItem icon={FileText} label="Quotes" to="/quotes" />
                         <SidebarItem icon={Users} label="Customers" to="/customers" />
                         <SidebarItem icon={ShoppingBag} label="Products" to="/products" />
+                        <SidebarItem icon={ArrowLeftRight} label="Mappings" to="/mappings" />
                     </nav>
                 </div>
 

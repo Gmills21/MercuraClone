@@ -3,7 +3,7 @@ Email webhook handlers for SendGrid and Mailgun.
 """
 
 from fastapi import APIRouter, Request, HTTPException, Header
-from app.models import WebhookPayload, InboundEmail, EmailStatus
+from app.models import WebhookPayload, InboundEmail, EmailStatus, Quote, QuoteItem, QuoteStatus
 from app.database import db
 from app.services.gemini_service import gemini_service
 from app.config import settings
@@ -11,6 +11,8 @@ import hmac
 import hashlib
 import base64
 import logging
+import pandas as pd
+import io
 from typing import Optional
 from datetime import datetime
 
@@ -88,6 +90,17 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
                 detail="Daily email quota exceeded"
             )
         
+        # Check idempotency
+        if payload.message_id:
+            existing_email = await db.get_email_by_message_id(payload.message_id)
+            if existing_email:
+                logger.info(f"Duplicate email skipped: {payload.message_id}")
+                return {
+                    "status": "skipped",
+                    "email_id": existing_email['id'],
+                    "message": "Email already processed"
+                }
+        
         # Step 2: Create inbound email record
         inbound_email = InboundEmail(
             sender_email=payload.sender,
@@ -96,7 +109,8 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
             status=EmailStatus.PENDING,
             has_attachments=len(payload.attachments) > 0,
             attachment_count=len(payload.attachments),
-            user_id=user['id']
+            user_id=user['id'],
+            message_id=payload.message_id
         )
         
         email_id = await db.create_inbound_email(inbound_email)
@@ -124,6 +138,30 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
                     )
                     extraction_results.append(result)
                     
+                elif any(ext in filename.lower() for ext in ['.xlsx', '.xls', '.csv']):
+                    logger.info(f"Processing spreadsheet attachment: {filename}")
+                    try:
+                        # Decode base64
+                        file_bytes = base64.b64decode(content)
+                        
+                        # Read with Pandas
+                        if filename.lower().endswith('.csv'):
+                            df = pd.read_csv(io.BytesIO(file_bytes))
+                        else:
+                            df = pd.read_excel(io.BytesIO(file_bytes))
+                        
+                        # Convert to text/markdown for Gemini
+                        spreadsheet_text = df.to_markdown()
+                        
+                        # Extract using Gemini text engine
+                        result = await gemini_service.extract_from_text(
+                            text=spreadsheet_text,
+                            context=f"Spreadsheet file: {filename}. Email subject: {payload.subject}"
+                        )
+                        extraction_results.append(result)
+                    except Exception as spreadsheet_err:
+                        logger.error(f"Failed to process spreadsheet {filename}: {spreadsheet_err}")
+
                 elif any(img_type in content_type for img_type in ['image/png', 'image/jpeg', 'image/jpg']):
                     # Determine image type
                     img_type = 'png' if 'png' in content_type else 'jpg'
@@ -146,8 +184,9 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
             )
             extraction_results.append(result)
         
-        # Step 4: Store line items
+        # Step 4: Store line items and Create Draft Quote
         total_items_created = 0
+        all_extracted_items = []
         
         for result in extraction_results:
             if result.success and result.line_items:
@@ -159,7 +198,54 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
                 
                 item_ids = await db.create_line_items(email_id, items_with_confidence)
                 total_items_created += len(item_ids)
+                all_extracted_items.extend(result.line_items)
                 logger.info(f"Created {len(item_ids)} line items")
+
+        # Create Draft Quote from extracted items
+        if all_extracted_items:
+            try:
+                # Calculate total
+                total_amount = sum(
+                    float(item.get('total_price') or 0) 
+                    for item in all_extracted_items
+                )
+
+                # Create Quote Items
+                quote_items = []
+                for item in all_extracted_items:
+                    quote_items.append(QuoteItem(
+                        quote_id="pending", # Will be set by db.create_quote
+                        description=item.get('description') or item.get('item_name') or "Unknown Item",
+                        sku=item.get('sku'),
+                        quantity=int(item.get('quantity') or 1),
+                        unit_price=float(item.get('unit_price') or 0.0),
+                        total_price=float(item.get('total_price') or 0.0),
+                        metadata={"original_extraction": item}
+                    ))
+
+                # Create Quote
+                # Generate a simple quote number
+                quote_number = f"RFQ-{datetime.utcnow().strftime('%Y%m%d')}-{email_id[:8]}"
+                
+                quote = Quote(
+                    user_id=user['id'],
+                    quote_number=quote_number,
+                    status=QuoteStatus.DRAFT,
+                    total_amount=total_amount,
+                    items=quote_items,
+                    metadata={
+                        "source_email_id": email_id, 
+                        "source_subject": payload.subject,
+                        "source_sender": payload.sender
+                    }
+                )
+
+                quote_id = await db.create_quote(quote)
+                logger.info(f"Created draft quote {quote_id} from email {email_id}")
+                
+            except Exception as e:
+                logger.error(f"Error creating draft quote: {e}")
+                # Continue execution to update email status
         
         # Step 5: Update email status
         if total_items_created > 0:

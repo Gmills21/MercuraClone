@@ -113,11 +113,39 @@ class Catalog(BaseModel):
     sku: str
     item_name: str
     expected_price: Optional[float] = None
+    cost_price: Optional[float] = None
     category: Optional[str] = None
     supplier: Optional[str] = None
     last_updated: datetime = Field(default_factory=datetime.utcnow)
     metadata: Optional[Dict[str, Any]] = None
 
+
+class CompetitorMap(BaseModel):
+    """Mapping from competitor SKU to our SKU."""
+    id: Optional[str] = None
+    user_id: str
+    competitor_sku: str
+    our_sku: str
+    competitor_name: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class CatalogMatch(BaseModel):
+    """A suggested match from the catalog."""
+    catalog_item: Catalog
+    score: float  # 0.0 to 1.0
+    match_type: str  # 'sku_exact', 'sku_partial', 'name_overlap', 'fuzzy'
+
+
+class SuggestionRequest(BaseModel):
+    """Request for product suggestions."""
+    items: List[Dict[str, str]]  # List of {sku, description, ...}
+
+
+class SuggestionResponse(BaseModel):
+    """Response with suggestions."""
+    suggestions: Dict[int, List[CatalogMatch]]  # Key is index of item in request
 
 
 class QuoteStatus(str, Enum):
@@ -153,6 +181,8 @@ class QuoteItem(BaseModel):
     quantity: int = 1
     unit_price: float
     total_price: float
+    validation_warnings: List[str] = []
+    margin: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -161,6 +191,7 @@ class Quote(BaseModel):
     id: Optional[str] = None
     user_id: str
     customer_id: Optional[str] = None
+    inbound_email_id: Optional[str] = None
     quote_number: str
     status: QuoteStatus = QuoteStatus.DRAFT
     total_amount: float = 0.0
@@ -235,12 +266,17 @@ CREATE TABLE IF NOT EXISTS catalogs (
     sku TEXT NOT NULL,
     item_name TEXT NOT NULL,
     expected_price NUMERIC(10, 2),
+    cost_price NUMERIC(10, 2),
     category TEXT,
     supplier TEXT,
     last_updated TIMESTAMPTZ DEFAULT NOW(),
     metadata JSONB,
+    embedding vector(768), -- Gemini embeddings are 768 dimensions
     UNIQUE(user_id, sku)
 );
+
+-- Index for vector search
+CREATE INDEX IF NOT EXISTS idx_catalogs_embedding ON catalogs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Customers table
 CREATE TABLE IF NOT EXISTS customers (
@@ -260,6 +296,7 @@ CREATE TABLE IF NOT EXISTS quotes (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+    inbound_email_id UUID REFERENCES inbound_emails(id) ON DELETE SET NULL,
     quote_number TEXT NOT NULL,
     status TEXT DEFAULT 'draft',
     total_amount NUMERIC(10, 2) DEFAULT 0.00,
@@ -279,7 +316,21 @@ CREATE TABLE IF NOT EXISTS quote_items (
     quantity INTEGER DEFAULT 1,
     unit_price NUMERIC(10, 2),
     total_price NUMERIC(10, 2),
+    validation_warnings JSONB,
+    margin NUMERIC(10, 4),
     metadata JSONB
+);
+
+-- Competitor Maps table
+CREATE TABLE IF NOT EXISTS competitor_maps (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    competitor_sku TEXT NOT NULL,
+    our_sku TEXT NOT NULL,
+    competitor_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB,
+    UNIQUE(user_id, competitor_sku)
 );
 
 -- Quote Templates table
@@ -294,6 +345,7 @@ CREATE TABLE IF NOT EXISTS quote_templates (
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_inbound_emails_sender ON inbound_emails(sender_email);
+CREATE INDEX IF NOT EXISTS idx_inbound_emails_message_id ON inbound_emails(message_id);
 CREATE INDEX IF NOT EXISTS idx_inbound_emails_status ON inbound_emails(status);
 CREATE INDEX IF NOT EXISTS idx_inbound_emails_received_at ON inbound_emails(received_at);
 CREATE INDEX IF NOT EXISTS idx_line_items_email_id ON line_items(email_id);
@@ -319,10 +371,53 @@ CREATE POLICY line_items_select_own ON line_items FOR SELECT USING (
     email_id IN (SELECT id FROM inbound_emails WHERE user_id = auth.uid())
 );
 CREATE POLICY catalogs_all_own ON catalogs FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY competitor_maps_all_own ON competitor_maps FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY customers_all_own ON customers FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY quotes_all_own ON quotes FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY quote_items_all_own ON quote_items FOR ALL USING (
     quote_id IN (SELECT id FROM quotes WHERE user_id = auth.uid())
 );
 CREATE POLICY quote_templates_all_own ON quote_templates FOR ALL USING (auth.uid() = user_id);
+
+-- RPC Function for Vector Search
+CREATE OR REPLACE FUNCTION match_catalogs (
+  query_embedding vector(768),
+  match_threshold float,
+  match_count int,
+  filter_user_id uuid
+)
+RETURNS TABLE (
+  id uuid,
+  user_id uuid,
+  sku text,
+  item_name text,
+  expected_price numeric,
+  cost_price numeric,
+  category text,
+  supplier text,
+  metadata jsonb,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id,
+    c.user_id,
+    c.sku,
+    c.item_name,
+    c.expected_price,
+    c.cost_price,
+    c.category,
+    c.supplier,
+    c.metadata,
+    1 - (c.embedding <=> query_embedding) as similarity
+  FROM catalogs c
+  WHERE c.user_id = filter_user_id
+  AND 1 - (c.embedding <=> query_embedding) > match_threshold
+  ORDER BY c.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
 """

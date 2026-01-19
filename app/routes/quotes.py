@@ -1,11 +1,24 @@
 from fastapi import APIRouter, HTTPException, Query, Header
 from app.database import db
 from app.models import Quote, QuoteStatus
+from app.services.export_service import export_service
+from app.services.email_service import email_service
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
 import logging
+import base64
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/quotes", tags=["quotes"])
+
+
+class SendQuoteRequest(BaseModel):
+    """Request model for sending a quote."""
+    to_email: Optional[EmailStr] = None
+    subject: Optional[str] = None
+    message: Optional[str] = None
+
 
 
 @router.post("/")
@@ -49,6 +62,29 @@ async def get_quote(quote_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching quote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{quote_id}")
+async def update_quote(
+    quote_id: str,
+    quote: Quote,
+    x_user_id: str = Header(..., alias="X-User-ID")
+):
+    """Update a quote and its items."""
+    try:
+        # Run validation
+        if quote.items:
+            await validate_quote_items(quote.items, x_user_id)
+
+        # Extract data
+        quote_data = quote.model_dump(exclude={'id', 'items', 'created_at', 'user_id'}, exclude_none=True)
+        items_data = [item.model_dump(exclude={'id'}, exclude_none=True) for item in quote.items] if quote.items is not None else None
+        
+        await db.update_quote(quote_id, quote_data, items_data)
+        return {"message": "Quote updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating quote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
