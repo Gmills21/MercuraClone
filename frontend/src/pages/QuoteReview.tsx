@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { quotesApi, productsApi, quotesApiExtended } from '../services/api';
-import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2 } from 'lucide-react';
+import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles } from 'lucide-react';
 
 export const QuoteReview = () => {
     const { id } = useParams();
@@ -466,8 +466,8 @@ export const QuoteReview = () => {
                                                         </div>
                                                     )}
                                                     
-                                                    {/* Margin Indicator */}
-                                                    <div className="mt-2 flex items-center gap-2">
+                                                    {/* Margin Boost Badge - Phase 2 Enhancement */}
+                                                    <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                         <span className="text-xs text-slate-500">Margin:</span>
                                                         <span className={`text-xs font-medium ${
                                                             currentMargin > 20 ? 'text-emerald-400' : 
@@ -475,6 +475,25 @@ export const QuoteReview = () => {
                                                         }`}>
                                                             {currentMargin.toFixed(1)}%
                                                         </span>
+                                                        {highMarginAlt && (
+                                                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30">
+                                                                <Sparkles size={10} className="text-amber-400" />
+                                                                <span className="text-xs font-semibold text-amber-300">
+                                                                    Margin Boost Available
+                                                                </span>
+                                                                <span className="text-xs text-amber-400 font-bold">
+                                                                    +{(
+                                                                        ((highMarginAlt.catalog_item.expected_price - (highMarginAlt.catalog_item.cost_price || highMarginAlt.catalog_item.expected_price * 0.7)) / highMarginAlt.catalog_item.expected_price * 100) - currentMargin
+                                                                    ).toFixed(1)}%
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        {currentMargin > 20 && !highMarginAlt && (
+                                                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                                                                <TrendingUp size={10} className="text-emerald-400" />
+                                                                <span className="text-xs font-semibold text-emerald-300">High Margin</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     
                                                     {/* High Margin Alternative Alert */}
@@ -657,6 +676,21 @@ export const QuoteReview = () => {
                                                                 className="bg-transparent border-none w-full text-slate-200 focus:ring-0 p-0 placeholder-slate-600"
                                                                 placeholder="Item description"
                                                             />
+                                                            {/* Phase 2: Margin Boost Badge in Table View */}
+                                                            {suggestions[index] && suggestions[index].length > 0 && (() => {
+                                                                const highMarginAlt = findHighMarginAlternatives(item, suggestions[index]);
+                                                                if (highMarginAlt) {
+                                                                    const altMargin = ((highMarginAlt.catalog_item.expected_price - (highMarginAlt.catalog_item.cost_price || highMarginAlt.catalog_item.expected_price * 0.7)) / highMarginAlt.catalog_item.expected_price * 100);
+                                                                    const marginGain = altMargin - currentMargin;
+                                                                    return (
+                                                                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30">
+                                                                            <Sparkles size={12} className="text-amber-400" />
+                                                                            <span className="text-xs font-semibold text-amber-300">+{marginGain.toFixed(1)}%</span>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
                                                             {currentMargin < 10 && (
                                                                 <TrendingDown size={14} className="text-red-400" title={`Low Margin: ${currentMargin.toFixed(1)}%`} />
                                                             )}

@@ -1,0 +1,53 @@
+/**
+ * Phase 4: Chrome Overlay Styles
+ * Lightweight, non-intrusive button that fits into email UI
+ */
+
+.mercura-quick-quote-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-left: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.mercura-quick-quote-button:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+.mercura-quick-quote-button:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.mercura-quick-quote-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.mercura-quick-quote-button svg {
+    flex-shrink: 0;
+}
+
+/* Gmail-specific positioning */
+[role="main"] .mercura-quick-quote-button {
+    margin-top: 8px;
+}
+
+/* Outlook-specific positioning */
+.ms-CommandBar .mercura-quick-quote-button {
+    margin-right: 8px;
+}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowUpRight, DollarSign, FileText, CheckCircle, Clock, Users, ShoppingBag, TrendingUp, Zap, Target, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, DollarSign, FileText, CheckCircle, Clock, Users, ShoppingBag, TrendingUp, Zap, Target, AlertCircle, Mail, Copy, CheckCircle2, Link2, Power, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { statsApi, quotesApi } from '../services/api';
 
@@ -34,6 +34,13 @@ export const Dashboard = () => {
     const [quotes, setQuotes] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [timeRange, setTimeRange] = useState(30);
+    const [webhookEnabled, setWebhookEnabled] = useState(true);
+    const [webhookCopied, setWebhookCopied] = useState(false);
+    
+    // Construct webhook URL from API base URL
+    const API_BASE = 'http://localhost:8000';
+    const webhookUrl = `${API_BASE}/webhooks/inbound-email`;
+    const intakeEmail = 'intake@our-startup.com';
 
     useEffect(() => {
         fetchDashboardData();
@@ -114,6 +121,124 @@ export const Dashboard = () => {
                         <FileText size={18} />
                         Create New Quote
                     </Link>
+                </div>
+            </div>
+
+            {/* Phase 1: Connection Center - 1-Click Inbox Sync */}
+            <div className="glass-panel rounded-2xl p-6 border-2 border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
+                <div className="flex items-start justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-blue-500/20 rounded-xl">
+                            <Mail size={24} className="text-blue-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                Connection Center
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    3-Minute Setup
+                                </span>
+                            </h2>
+                            <p className="text-sm text-slate-400 mt-1">Eliminate Integration Anxiety - No IT Permission Required</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setWebhookEnabled(!webhookEnabled)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            webhookEnabled
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                                : 'bg-slate-700/50 text-slate-400 border border-slate-600 hover:bg-slate-700'
+                        }`}
+                    >
+                        <Power size={16} className={webhookEnabled ? 'text-emerald-400' : 'text-slate-500'} />
+                        {webhookEnabled ? 'Active' : 'Inactive'}
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Email Forwarding Section */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <CheckCircle2 size={18} className="text-blue-400" />
+                            <h3 className="text-lg font-semibold text-white">1-Click Inbox Sync</h3>
+                        </div>
+                        <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                            <p className="text-sm text-slate-400 mb-3">Forward your quote request emails to:</p>
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="flex-1 px-4 py-3 bg-slate-800/50 rounded-lg border border-slate-700/50 font-mono text-sm text-white">
+                                    {intakeEmail}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(intakeEmail);
+                                        setWebhookCopied(true);
+                                        setTimeout(() => setWebhookCopied(false), 2000);
+                                    }}
+                                    className="p-3 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors"
+                                    title="Copy email address"
+                                >
+                                    {webhookCopied ? (
+                                        <CheckCircle2 size={18} className="text-white" />
+                                    ) : (
+                                        <Copy size={18} className="text-white" />
+                                    )}
+                                </button>
+                            </div>
+                            <div className="flex items-start gap-2 text-xs text-slate-400">
+                                <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                                <span>Works with Gmail, Outlook, and any email provider. No API keys or complex setup required.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Webhook URL Section */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Link2 size={18} className="text-purple-400" />
+                            <h3 className="text-lg font-semibold text-white">Webhook Endpoint</h3>
+                        </div>
+                        <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-700/50">
+                            <p className="text-sm text-slate-400 mb-3">For advanced integrations (SendGrid/Mailgun):</p>
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="flex-1 px-4 py-3 bg-slate-800/50 rounded-lg border border-slate-700/50 font-mono text-xs text-white break-all">
+                                    {webhookUrl}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(webhookUrl);
+                                        setWebhookCopied(true);
+                                        setTimeout(() => setWebhookCopied(false), 2000);
+                                    }}
+                                    className="p-3 bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors flex-shrink-0"
+                                    title="Copy webhook URL"
+                                >
+                                    {webhookCopied ? (
+                                        <CheckCircle2 size={18} className="text-white" />
+                                    ) : (
+                                        <Copy size={18} className="text-white" />
+                                    )}
+                                </button>
+                            </div>
+                            <div className="flex items-start gap-2 text-xs text-slate-400">
+                                <Info size={14} className="mt-0.5 flex-shrink-0" />
+                                <span>Configure this URL in your email provider's webhook settings for automated processing.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Status Indicator */}
+                <div className="mt-6 pt-6 border-t border-slate-700/50">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full ${webhookEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`}></div>
+                            <span className="text-sm text-slate-400">
+                                {webhookEnabled ? 'Connection active - Ready to receive emails' : 'Connection inactive'}
+                            </span>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                            vs. Mercura: 3 days → 3 minutes
+                        </div>
+                    </div>
                 </div>
             </div>
 

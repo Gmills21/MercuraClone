@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { emailsApi, quotesApiExtended } from '../services/api';
-import { Mail, CheckCircle, XCircle, Clock, AlertCircle, FileText, Send, Download, Eye, ArrowRight, Sparkles } from 'lucide-react';
+import { Mail, CheckCircle, XCircle, Clock, AlertCircle, FileText, Send, Download, Eye, ArrowRight, Sparkles, Search, Package } from 'lucide-react';
 
 export const Emails = () => {
     const navigate = useNavigate();
@@ -107,6 +107,99 @@ export const Emails = () => {
         }
     };
 
+    // Phase 3: Progress Stepper Component
+    const getProgressSteps = (email: any) => {
+        const steps = [
+            { 
+                id: 'extracting', 
+                label: 'Extracting Specs', 
+                icon: FileText,
+                status: 'pending' as 'pending' | 'active' | 'completed'
+            },
+            { 
+                id: 'matching', 
+                label: 'Matching SKUs', 
+                icon: Search,
+                status: 'pending' as 'pending' | 'active' | 'completed'
+            },
+            { 
+                id: 'ready', 
+                label: 'Ready for Review', 
+                icon: CheckCircle,
+                status: 'pending' as 'pending' | 'active' | 'completed'
+            }
+        ];
+
+        if (email.status === 'processing') {
+            // Determine which step based on whether quotes exist
+            if (emailQuotes[email.id] && emailQuotes[email.id].length > 0) {
+                steps[0].status = 'completed';
+                steps[1].status = 'completed';
+                steps[2].status = 'active';
+            } else {
+                steps[0].status = 'active';
+                steps[1].status = 'pending';
+                steps[2].status = 'pending';
+            }
+        } else if (email.status === 'processed') {
+            steps[0].status = 'completed';
+            steps[1].status = 'completed';
+            steps[2].status = 'completed';
+        } else if (email.status === 'failed') {
+            // Find the step that failed (usually extraction)
+            steps[0].status = 'completed';
+            steps[1].status = 'pending';
+            steps[2].status = 'pending';
+        }
+
+        return steps;
+    };
+
+    const ProgressStepper = ({ email }: { email: any }) => {
+        const steps = getProgressSteps(email);
+        
+        return (
+            <div className="flex items-center gap-2 py-2">
+                {steps.map((step, index) => {
+                    const Icon = step.icon;
+                    const isLast = index === steps.length - 1;
+                    
+                    return (
+                        <React.Fragment key={step.id}>
+                            <div className="flex flex-col items-center gap-1">
+                                <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors ${
+                                    step.status === 'completed' 
+                                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
+                                        : step.status === 'active'
+                                        ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse'
+                                        : 'bg-slate-800/50 border-slate-600 text-slate-500'
+                                }`}>
+                                    <Icon size={14} />
+                                </div>
+                                <span className={`text-xs font-medium ${
+                                    step.status === 'completed' 
+                                        ? 'text-emerald-400' 
+                                        : step.status === 'active'
+                                        ? 'text-blue-400'
+                                        : 'text-slate-500'
+                                }`}>
+                                    {step.label}
+                                </span>
+                            </div>
+                            {!isLast && (
+                                <div className={`w-8 h-0.5 mx-1 transition-colors ${
+                                    step.status === 'completed' 
+                                        ? 'bg-emerald-500' 
+                                        : 'bg-slate-700'
+                                }`} />
+                            )}
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+        );
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -137,6 +230,7 @@ export const Emails = () => {
                         <thead>
                             <tr className="bg-slate-800/30 text-slate-400 border-b border-slate-700/50">
                                 <th className="px-6 py-4">Status</th>
+                                <th className="px-6 py-4">Progress</th>
                                 <th className="px-6 py-4">Sender</th>
                                 <th className="px-6 py-4">Subject</th>
                                 <th className="px-6 py-4">Received</th>
@@ -146,9 +240,9 @@ export const Emails = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-800/50">
                             {loading ? (
-                                <tr><td colSpan={6} className="text-center py-8 text-slate-500">Loading...</td></tr>
+                                <tr><td colSpan={7} className="text-center py-8 text-slate-500">Loading...</td></tr>
                             ) : emails.length === 0 ? (
-                                <tr><td colSpan={6} className="text-center py-8 text-slate-500">No emails found.</td></tr>
+                                <tr><td colSpan={7} className="text-center py-8 text-slate-500">No emails found.</td></tr>
                             ) : (
                                 emails.map((email) => {
                                     const quotes = emailQuotes[email.id] || [];
@@ -162,6 +256,9 @@ export const Emails = () => {
                                                         {getStatusIcon(email.status)}
                                                         {email.status}
                                                     </span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <ProgressStepper email={email} />
                                                 </td>
                                                 <td className="px-6 py-4 text-white font-medium">{email.sender_email}</td>
                                                 <td className="px-6 py-4 text-slate-300 max-w-xs truncate" title={email.subject_line}>
@@ -241,7 +338,7 @@ export const Emails = () => {
                                             {/* Expanded Quote Details */}
                                             {hasQuotes && quotes.length > 0 && (
                                                 <tr className="bg-slate-900/30">
-                                                    <td colSpan={6} className="px-6 py-4">
+                                                    <td colSpan={7} className="px-6 py-4">
                                                         <div className="space-y-3">
                                                             <div className="text-xs font-semibold text-slate-400 mb-2">Generated Quotes:</div>
                                                             {quotes.map((quote: any) => (
