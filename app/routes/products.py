@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, Header, UploadFile, File, Body
+from pydantic import BaseModel
 from app.database import db
 from app.models import Catalog, SuggestionRequest, SuggestionResponse, CatalogMatch, CompetitorMap
+from app.services.gemini_service import gemini_service
 from typing import List, Dict, Any
 import logging
 import pandas as pd
@@ -154,6 +156,53 @@ async def upload_competitor_maps(
     except Exception as e:
         logger.error(f"Error uploading competitor maps: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class ChatRequest(BaseModel):
+    query: str
+
+@router.post("/chat")
+async def chat_with_catalog(
+    request: ChatRequest,
+    x_user_id: str = Header(..., alias="X-User-ID")
+):
+    """Chat with catalog - natural language queries about products."""
+    try:
+        # Simple implementation: parse query and search catalog
+        # In production, this could use Gemini to understand intent better
+        
+        query = request.query
+        # Extract key terms from query
+        query_lower = query.lower()
+        
+        # Check for common patterns
+        if any(word in query_lower for word in ['cheaper', 'cheap', 'low price', 'affordable', 'budget']):
+            # Search and sort by price
+            results = await db.search_catalog(x_user_id, query)
+            results = sorted(results, key=lambda x: x.get('expected_price', 0) or float('inf'))[:5]
+        elif any(word in query_lower for word in ['stock', 'available', 'inventory']):
+            # For now, just return search results
+            results = await db.search_catalog(x_user_id, query)[:5]
+        else:
+            # Regular search
+            results = await db.search_catalog(x_user_id, query)[:5]
+        
+        # Format response
+        if results:
+            response_text = f"I found {len(results)} matching products:\n\n"
+            for item in results:
+                response_text += f"• {item.get('item_name', 'N/A')} (SKU: {item.get('sku', 'N/A')}) - ${item.get('expected_price', 0):.2f}\n"
+        else:
+            response_text = "I couldn't find any products matching your query. Try searching with different keywords."
+        
+        return {
+            "query": query,
+            "response": response_text,
+            "products": results
+        }
+    except Exception as e:
+        logger.error(f"Error in catalog chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/suggest", response_model=SuggestionResponse)
 async def suggest_products(

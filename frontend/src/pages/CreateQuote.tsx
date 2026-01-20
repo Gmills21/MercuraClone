@@ -1,240 +1,330 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Trash2, Save, FileText, ChevronLeft } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { quotesApi, productsApi, customersApi } from '../services/api';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { Upload, FileText, Mail, Loader2, TrendingUp } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { uploadApi, quotesApi } from '@/services/api';
+import { toast } from 'sonner';
+
+interface RecentQuote {
+  id: string;
+  quote_number: string;
+  customer?: string;
+  status: string;
+  total_amount: number;
+  margin_added?: number;
+  created_at?: string;
+}
 
 export const CreateQuote = () => {
-    const navigate = useNavigate();
-    const [customers, setCustomers] = useState<any[]>([]);
-    const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [recentQuotes, setRecentQuotes] = useState<RecentQuote[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const [lineItems, setLineItems] = useState<any[]>([]);
+  // Fetch recent quotes on mount
+  useEffect(() => {
+    fetchRecentQuotes();
+  }, []);
 
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<any[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
+  const fetchRecentQuotes = async () => {
+    try {
+      const response = await quotesApi.list(10);
+      const quotes = response.data.map((quote: any) => ({
+        id: quote.id,
+        quote_number: quote.quote_number,
+        customer: quote.customer_name || quote.customers?.name || 'Unknown Customer',
+        status: quote.status,
+        total_amount: quote.total_amount || 0,
+        margin_added: quote.metadata?.total_margin_added || 0,
+        created_at: quote.created_at,
+      }));
+      setRecentQuotes(quotes);
+    } catch (error) {
+      console.error('Error fetching recent quotes:', error);
+    }
+  };
 
-    useEffect(() => {
-        // Load customers
-        customersApi.list().then(res => setCustomers(res.data)).catch(console.error);
-    }, []);
+  const handleFileUpload = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const file = fileArray[0]; // Process first file
 
-    useEffect(() => {
-        // Debounced search
-        const timer = setTimeout(() => {
-            if (searchQuery.length > 2) {
-                setIsSearching(true);
-                productsApi.search(searchQuery)
-                    .then(res => setSearchResults(res.data))
-                    .catch(console.error)
-                    .finally(() => setIsSearching(false));
-            } else {
-                setSearchResults([]);
-            }
-        }, 300);
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
+    if (!file) return;
 
-    const addItem = (product: any) => {
-        setLineItems(prev => [
-            ...prev,
-            { ...product, product_id: product.id, quantity: 1, unit_price: product.expected_price || 0 }
-        ]);
-        setSearchQuery('');
-        setSearchResults([]);
-    };
+    // Validate file type
+    const validTypes = [
+      'application/pdf',
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ];
 
-    const updateQuantity = (index: number, qty: number) => {
-        const newItems = [...lineItems];
-        newItems[index].quantity = qty;
-        setLineItems(newItems);
-    };
+    const validExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.csv'];
+    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
 
-    const removeItem = (index: number) => {
-        setLineItems(prev => prev.filter((_, i) => i !== index));
-    };
+    if (
+      !validTypes.includes(file.type) &&
+      !validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext))
+    ) {
+      toast.error('Invalid file type', {
+        description: 'Please upload a PDF, image (PNG/JPG), or spreadsheet (CSV/Excel)',
+      });
+      return;
+    }
 
-    const calculateTotal = () => {
-        return lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-    };
+    setIsProcessing(true);
 
-    const handleSave = async () => {
-        try {
-            if (!selectedCustomerId) {
-                alert('Please select a customer');
-                return;
-            }
-            const quoteData = {
-                user_id: 'test-user', // Handled by API client header usually, but model asks for it? No model ignores if not passed? Wait, model in backend sets it.
-                customer_id: selectedCustomerId,
-                quote_number: `QT-${Date.now()}`,
-                items: lineItems.map(item => ({
-                    product_id: item.product_id,
-                    sku: item.sku,
-                    description: item.item_name,
-                    quantity: item.quantity,
-                    unit_price: item.unit_price,
-                    total_price: item.quantity * item.unit_price
-                })),
-                total_amount: calculateTotal()
-            };
+    try {
+      const response = await uploadApi.upload(file);
+      const data = response.data;
 
-            await quotesApi.create(quoteData);
-            navigate('/quotes');
-        } catch (e) {
-            console.error(e);
-            alert('Failed to save quote');
+      // Show "Aha Moment" toast with margin improvements
+      if (data.total_margin_added > 0) {
+        const topImprovement = data.margin_improvements?.[0];
+        if (topImprovement) {
+          toast.success(`Margin Added: $${data.total_margin_added.toFixed(2)}`, {
+            description: `Swapped ${topImprovement.original_sku || 'Competitor SKU'} for High-Margin SKU ${topImprovement.suggested_sku}`,
+            duration: 6000,
+          });
+        } else {
+          toast.success(`Margin Added: $${data.total_margin_added.toFixed(2)}`, {
+            description: 'Optimized SKU matching increased quote profitability',
+            duration: 6000,
+          });
         }
-    };
 
-    return (
-        <div className="space-y-6 animate-fade-in">
-            <div className="flex items-center gap-4">
-                <Link to="/" className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white">
-                    <ChevronLeft size={24} />
-                </Link>
-                <div>
-                    <h1 className="text-2xl font-bold text-white">New Quote</h1>
-                    <p className="text-slate-400 text-sm">Create a new sales quote for a customer</p>
+        // Show additional improvements if any
+        if (data.margin_improvements && data.margin_improvements.length > 1) {
+          const additionalCount = data.margin_improvements.length - 1;
+          setTimeout(() => {
+            toast.info(`${additionalCount} more optimization${additionalCount > 1 ? 's' : ''} applied`, {
+              description: 'View quote details to see all margin improvements',
+            });
+          }, 2000);
+        }
+      } else {
+        toast.success('Extraction completed', {
+          description: `Extracted ${data.items_extracted} line items from ${file.name}`,
+        });
+      }
+
+      // Refresh recent quotes
+      await fetchRecentQuotes();
+
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast.error('Upload failed', {
+        description: error.response?.data?.detail || error.message || 'Failed to process file',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      if (isProcessing) return;
+
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleFileUpload(files);
+      }
+    },
+    [isProcessing]
+  );
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0 && !isProcessing) {
+        handleFileUpload(e.target.files);
+      }
+    },
+    [isProcessing]
+  );
+
+  const handleClick = useCallback(() => {
+    if (!isProcessing && fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, [isProcessing]);
+
+  const getStatusVariant = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'draft':
+        return 'secondary';
+      case 'processing':
+        return 'default';
+      case 'sent':
+        return 'default';
+      default:
+        return 'secondary';
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Universal Intake</h1>
+        <p className="text-muted-foreground mt-2">
+          Drop messy PDFs, emails, or napkin sketches here to automatically create quotes
+        </p>
+      </div>
+
+      {/* Drop Zone */}
+      <Card
+        className={`border-2 border-dashed transition-all duration-200 cursor-pointer ${
+          isDragging
+            ? 'border-primary bg-primary/5 scale-[1.02]'
+            : isProcessing
+            ? 'border-muted-foreground/25 opacity-50 cursor-not-allowed'
+            : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+        }`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={handleClick}
+      >
+        <CardContent className="flex flex-col items-center justify-center py-16 px-6">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+            onChange={handleFileInputChange}
+            disabled={isProcessing}
+          />
+          <div className="flex flex-col items-center gap-4 text-center">
+            {isProcessing ? (
+              <>
+                <div className="rounded-full bg-primary/10 p-6">
+                  <Loader2 className="h-12 w-12 text-primary animate-spin" />
                 </div>
-                <div className="ml-auto flex gap-3">
-                    <button className="btn-secondary" onClick={() => navigate('/')}>Cancel</button>
-                    <button className="btn-primary flex items-center gap-2" onClick={handleSave}>
-                        <Save size={18} /> Save Quote
-                    </button>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-semibold">Processing...</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Extracting data and optimizing margins. This may take a few moments.
+                  </p>
                 </div>
+              </>
+            ) : (
+              <>
+                <div className="rounded-full bg-primary/10 p-6">
+                  <Upload className="h-12 w-12 text-primary" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-semibold">
+                    Drop Messy PDF, Email, or Napkin Sketch Here
+                  </h3>
+                  <p className="text-muted-foreground max-w-md">
+                    Drag and drop your files here, or click to browse. We'll extract the relevant
+                    information, match SKUs, and optimize margins automatically.
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 mt-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <FileText className="h-4 w-4" />
+                    <span>PDF Files</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Mail className="h-4 w-4" />
+                    <span>Email Attachments</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recent Extractions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Extractions</CardTitle>
+          <CardDescription>
+            Your recently created quotes from uploaded documents with margin optimizations
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {recentQuotes.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No recent extractions. Upload a file to get started.
             </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left Column: Customer & Details */}
-                <div className="space-y-6">
-                    <div className="glass-panel p-6 rounded-2xl space-y-4">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                            <Users size={20} className="text-primary-400" /> Customer Details
-                        </h2>
-
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-300">Select Customer</label>
-                            <select
-                                className="w-full input-field text-slate-300"
-                                value={selectedCustomerId}
-                                onChange={e => setSelectedCustomerId(e.target.value)}
-                            >
-                                <option value="">Select a customer...</option>
-                                {customers.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name} - {c.company}</option>
-                                ))}
-                            </select>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Value</TableHead>
+                  <TableHead className="text-right">Margin Added</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentQuotes.map((quote) => (
+                  <TableRow key={quote.id}>
+                    <TableCell className="font-medium">{quote.customer}</TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusVariant(quote.status)}>
+                        {quote.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {formatCurrency(quote.total_amount)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {quote.margin_added && quote.margin_added > 0 ? (
+                        <div className="flex items-center justify-end gap-1 text-green-500 font-semibold">
+                          <TrendingUp className="h-4 w-4" />
+                          <span>+{formatCurrency(quote.margin_added)}</span>
                         </div>
-                    </div>
-                </div>
-
-                {/* Right Column: Line Items */}
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="glass-panel p-6 rounded-2xl min-h-[500px] flex flex-col">
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                                <ShoppingBag size={20} className="text-primary-400" /> Line Items
-                            </h2>
-                            <div className="text-2xl font-bold text-white">
-                                Total: ${calculateTotal().toFixed(2)}
-                            </div>
-                        </div>
-
-                        {/* Product Search */}
-                        <div className="relative mb-6 z-20">
-                            <div className="relative">
-                                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                <input
-                                    type="text"
-                                    placeholder="Search products by SKU or Name..."
-                                    className="w-full input-field pl-10"
-                                    value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                />
-                            </div>
-
-                            {/* Search Results Dropdown */}
-                            {(searchResults.length > 0 || isSearching) && (
-                                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
-                                    {isSearching ? (
-                                        <div className="p-4 text-center text-slate-500">Searching...</div>
-                                    ) : (
-                                        searchResults.map(prod => (
-                                            <button
-                                                key={prod.id}
-                                                className="w-full text-left p-3 hover:bg-slate-800 flex items-center justify-between border-b border-slate-800/50 last:border-0"
-                                                onClick={() => addItem(prod)}
-                                            >
-                                                <div>
-                                                    <p className="font-medium text-white">{prod.item_name}</p>
-                                                    <p className="text-xs text-slate-400">SKU: {prod.sku}</p>
-                                                </div>
-                                                <span className="font-bold text-primary-400">${prod.expected_price}</span>
-                                            </button>
-                                        ))
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Items Table */}
-                        <div className="flex-1 overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead>
-                                    <tr className="border-b border-slate-700 text-slate-400">
-                                        <th className="pb-3 pl-2 w-1/2">Item</th>
-                                        <th className="pb-3 w-24">Price</th>
-                                        <th className="pb-3 w-24">Qty</th>
-                                        <th className="pb-3 w-24 text-right">Total</th>
-                                        <th className="pb-3 w-10"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-800/50">
-                                    {lineItems.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={5} className="py-12 text-center text-slate-500 italic">
-                                                No items added yet. Search products above.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        lineItems.map((item, idx) => (
-                                            <tr key={idx} className="group hover:bg-slate-800/30">
-                                                <td className="py-3 pl-2">
-                                                    <p className="font-medium text-white">{item.item_name}</p>
-                                                    <p className="text-xs text-slate-400">{item.sku}</p>
-                                                </td>
-                                                <td className="py-3 text-slate-300">${item.unit_price}</td>
-                                                <td className="py-3">
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center"
-                                                        value={item.quantity}
-                                                        onChange={(e) => updateQuantity(idx, parseInt(e.target.value))}
-                                                    />
-                                                </td>
-                                                <td className="py-3 text-right font-medium text-white">
-                                                    ${(item.quantity * item.unit_price).toFixed(2)}
-                                                </td>
-                                                <td className="py-3 text-right">
-                                                    <button
-                                                        className="text-slate-500 hover:text-rose-400 transition-colors p-1"
-                                                        onClick={() => removeItem(idx)}
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 };

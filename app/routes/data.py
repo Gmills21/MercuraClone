@@ -2,7 +2,7 @@
 Data API routes for querying emails and line items.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Header
 from app.database import db
 from app.models import EmailStatus
 from datetime import datetime, timedelta
@@ -121,7 +121,8 @@ async def get_line_items(
 
 @router.get("/stats")
 async def get_statistics(
-    days: int = Query(default=30, le=365, description="Number of days to analyze")
+    days: int = Query(default=30, le=365, description="Number of days to analyze"),
+    x_user_id: str = Header(..., alias="X-User-ID")
 ):
     """
     Get processing statistics.
@@ -131,6 +132,8 @@ async def get_statistics(
     - Total line items extracted
     - Average confidence score
     - Success rate
+    - Margin added (estimated)
+    - Quote velocity metrics
     """
     try:
         end_date = datetime.utcnow()
@@ -168,6 +171,36 @@ async def get_statistics(
             if confidence_scores else 0
         )
         
+        # Get quotes for margin calculation
+        quotes = await db.list_quotes(x_user_id, 1000)
+        quotes_in_range = [
+            q for q in quotes
+            if start_date <= datetime.fromisoformat(q['created_at'].replace('Z', '+00:00')) <= end_date
+        ]
+        
+        # Calculate margin added (simplified - based on optimized items)
+        total_margin_added = 0.0
+        for quote in quotes_in_range:
+            items = quote.get('items', [])
+            for item in items:
+                if item.get('metadata', {}).get('matched_catalog_cost_price'):
+                    cost = item['metadata']['matched_catalog_cost_price']
+                    price = item.get('unit_price', 0)
+                    qty = item.get('quantity', 1)
+                    if price > 0 and cost > 0:
+                        margin = (price - cost) * qty
+                        # Estimate original margin at 20% if not available
+                        original_margin = price * qty * 0.20
+                        margin_added = margin - original_margin
+                        total_margin_added += max(0, margin_added)
+        
+        # Calculate quote velocity (time saved)
+        # Assume human average is 30 minutes per quote, AI-assisted is 5 minutes
+        human_avg_minutes = 30
+        ai_avg_minutes = 5
+        time_saved_per_quote = human_avg_minutes - ai_avg_minutes
+        total_time_saved = len(quotes_in_range) * time_saved_per_quote
+        
         return {
             "period_days": days,
             "total_emails": total_emails,
@@ -182,7 +215,12 @@ async def get_statistics(
             "items_per_email": (
                 len(line_items) / len(processed_emails)
                 if processed_emails else 0
-            )
+            ),
+            "total_quotes": len(quotes_in_range),
+            "total_margin_added": round(total_margin_added, 2),
+            "time_saved_minutes": total_time_saved,
+            "time_saved_hours": round(total_time_saved / 60, 1),
+            "quotes_per_day": round(len(quotes_in_range) / days, 1) if days > 0 else 0
         }
         
     except Exception as e:

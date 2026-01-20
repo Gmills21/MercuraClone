@@ -424,6 +424,45 @@ class Database:
             logger.error(f"Error updating quote status: {e}")
             raise
 
+    async def get_quotes_by_email_id(self, email_id: str) -> List[Dict[str, Any]]:
+        """Get quotes created from a specific email."""
+        try:
+            result = self.admin_client.table('quotes')\
+                .select('*, customers(name, email), quote_items(*)')\
+                .eq('inbound_email_id', email_id)\
+                .order('created_at', desc=True)\
+                .execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting quotes by email ID: {e}")
+            return []
+
+    async def get_quote_by_share_token(self, share_token: str) -> Optional[Dict[str, Any]]:
+        """Get quote by share token from metadata."""
+        try:
+            # Fetch recent quotes and filter by share_token in metadata
+            # Note: For better performance in production, consider:
+            # 1. Adding a separate share_tokens table with index
+            # 2. Creating a Postgres function to search JSONB
+            # 3. Using a GIN index on metadata JSONB column
+            recent_quotes = self.admin_client.table('quotes')\
+                .select('*')\
+                .order('created_at', desc=True)\
+                .limit(1000)\
+                .execute()
+            
+            for quote in recent_quotes.data:
+                metadata = quote.get('metadata', {})
+                if isinstance(metadata, dict) and metadata.get('share_token') == share_token:
+                    quote_id = quote['id']
+                    # Get full quote with items
+                    return await self.get_quote(quote_id)
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error getting quote by share token: {e}")
+            return None
+
     async def update_quote(self, quote_id: str, quote_data: Dict[str, Any], items: List[Dict[str, Any]]) -> None:
         """Update quote and its items."""
         try:

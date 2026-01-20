@@ -43,6 +43,7 @@ export const productsApi = {
         });
     },
     suggest: (items: any[]) => api.post('/products/suggest', { items }),
+    chat: (query: string) => api.post('/products/chat', { query }),
 };
 
 export const customersApi = {
@@ -53,4 +54,31 @@ export const customersApi = {
 export const emailsApi = {
     list: (status?: string, limit = 50) => api.get(`/data/emails?limit=${limit}${status ? `&status=${status}` : ''}`),
     get: (id: string) => api.get(`/data/emails/${id}`),
+};
+
+export const quotesApiExtended = {
+    ...quotesApi,
+    getByEmail: (emailId: string) => api.get(`/quotes/email/${emailId}`),
+    generateExport: (quoteId: string, format: 'excel' | 'pdf' = 'excel') => 
+        api.get(`/quotes/${quoteId}/generate-export?format=${format}`, { responseType: 'blob' }),
+    draftReply: (quoteId: string) => api.post(`/quotes/${quoteId}/draft-reply`),
+    generateLink: (quoteId: string) => api.post(`/quotes/${quoteId}/generate-link`),
+    getPublicQuote: (token: string) => axios.get(`${API_URL}/quotes/public/${token}`),
+    confirmQuote: (token: string, data: any) => axios.post(`${API_URL}/quotes/public/${token}/confirm`, data),
+};
+
+export const uploadApi = {
+    upload: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/webhooks/upload', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+    },
+};
+
+export const statsApi = {
+    get: (days: number = 30) => api.get(`/data/stats?days=${days}`),
 };

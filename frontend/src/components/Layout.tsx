@@ -1,6 +1,14 @@
+// Test imports for shadcn UI components
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Tabs } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Toaster } from "@/components/ui/sonner";
+import { Table } from "@/components/ui/table";
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Users, ShoppingBag, Settings, LogOut, Inbox } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, ShoppingBag, Settings, LogOut, Inbox, ArrowLeftRight } from 'lucide-react';
 import clsx from 'clsx';
 
 const SidebarItem = ({ icon: Icon, label, to }: { icon: any, label: string, to: string }) => {
@@ -70,6 +78,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
                     {children}
                 </div>
             </main>
+            <Toaster />
         </div>
     );
 };

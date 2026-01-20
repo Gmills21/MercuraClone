@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { quotesApi, productsApi } from '../services/api';
-import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info } from 'lucide-react';
+import { quotesApi, productsApi, quotesApiExtended } from '../services/api';
+import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2 } from 'lucide-react';
 
 export const QuoteReview = () => {
     const { id } = useParams();
@@ -15,6 +15,10 @@ export const QuoteReview = () => {
     const [suggestions, setSuggestions] = useState<{[key: number]: any[]}>({});
     const [showSuggestions, setShowSuggestions] = useState<{[key: number]: boolean}>({});
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+    const [optimizedItems, setOptimizedItems] = useState<{[key: number]: any}>({});
+    const [showMarginOptimizer, setShowMarginOptimizer] = useState(true);
+    const [shareLink, setShareLink] = useState<string | null>(null);
+    const [generatingLink, setGeneratingLink] = useState(false);
 
     useEffect(() => {
         if (id) {
@@ -68,6 +72,91 @@ export const QuoteReview = () => {
         return lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price)), 0);
     };
 
+    // Calculate margin for an item
+    const calculateMargin = (item: any) => {
+        if (!item.unit_price || item.unit_price === 0) return 0;
+        // If we have cost_price from catalog match, use it
+        const costPrice = item.metadata?.matched_catalog_cost_price || 
+                         item.metadata?.original_cost_price || 
+                         (item.unit_price * 0.7); // Default 30% margin assumption
+        return ((item.unit_price - costPrice) / item.unit_price) * 100;
+    };
+
+    // Calculate total margin gained from optimizations
+    const totalMarginGained = useMemo(() => {
+        let total = 0;
+        lineItems.forEach((item, index) => {
+            const optimized = optimizedItems[index];
+            if (optimized && optimized.catalog_item) {
+                const originalMargin = calculateMargin(item);
+                const optimizedMargin = calculateMargin({
+                    ...item,
+                    unit_price: optimized.catalog_item.expected_price,
+                    metadata: {
+                        ...item.metadata,
+                        matched_catalog_cost_price: optimized.catalog_item.cost_price
+                    }
+                });
+                const marginGain = (optimizedMargin - originalMargin) / 100 * (item.unit_price * item.quantity);
+                total += marginGain;
+            }
+        });
+        return total;
+    }, [lineItems, optimizedItems]);
+
+    // Find high-margin alternatives for each item
+    const findHighMarginAlternatives = (item: any, matches: any[]) => {
+        if (!matches || matches.length === 0) return null;
+        
+        const currentMargin = calculateMargin(item);
+        const currentCost = item.unit_price * (1 - currentMargin / 100);
+        
+        // Find alternatives with better margin or lower cost
+        return matches.filter(match => {
+            const matchPrice = match.catalog_item.expected_price || 0;
+            const matchCost = match.catalog_item.cost_price || (matchPrice * 0.7);
+            const matchMargin = matchPrice > 0 ? ((matchPrice - matchCost) / matchPrice) * 100 : 0;
+            
+            // Consider it a good alternative if:
+            // 1. Margin is at least 5% better, OR
+            // 2. Cost is at least 10% lower with similar margin
+            return (matchMargin > currentMargin + 5) || 
+                   (matchCost < currentCost * 0.9 && matchMargin >= currentMargin - 2);
+        }).sort((a, b) => {
+            const marginA = a.catalog_item.expected_price > 0 ? 
+                ((a.catalog_item.expected_price - (a.catalog_item.cost_price || a.catalog_item.expected_price * 0.7)) / a.catalog_item.expected_price) * 100 : 0;
+            const marginB = b.catalog_item.expected_price > 0 ? 
+                ((b.catalog_item.expected_price - (b.catalog_item.cost_price || b.catalog_item.expected_price * 0.7)) / b.catalog_item.expected_price) * 100 : 0;
+            return marginB - marginA;
+        })[0]; // Return best match
+    };
+
+    // Check spec compliance (simplified - checks for common spec keywords)
+    const checkSpecCompliance = (item: any, requirements?: string[]) => {
+        if (!requirements || requirements.length === 0) return { compliant: true, reason: 'No requirements specified' };
+        
+        const description = (item.description || item.item_name || '').toLowerCase();
+        const sku = (item.sku || '').toLowerCase();
+        const searchText = `${description} ${sku}`;
+        
+        const missingSpecs: string[] = [];
+        requirements.forEach(req => {
+            const reqLower = req.toLowerCase();
+            // Check for common spec patterns
+            if (!searchText.includes(reqLower) && 
+                !searchText.includes(reqLower.replace(/\s+/g, '')) &&
+                !searchText.includes(reqLower.replace(/\s+/g, '-'))) {
+                missingSpecs.push(req);
+            }
+        });
+        
+        return {
+            compliant: missingSpecs.length === 0,
+            missingSpecs,
+            reason: missingSpecs.length > 0 ? `Missing: ${missingSpecs.join(', ')}` : 'All specs met'
+        };
+    };
+
     const handleSave = async (approve = false) => {
         try {
             setSaving(true);
@@ -108,8 +197,30 @@ export const QuoteReview = () => {
         alert("Quote copied to clipboard in ERP-ready Tab-Separated format!");
     };
 
+    const generateQuoteLink = async () => {
+        if (!id) return;
+        
+        try {
+            setGeneratingLink(true);
+            const res = await quotesApiExtended.generateLink(id);
+            const publicUrl = res.data.public_url;
+            setShareLink(publicUrl);
+            
+            // Copy to clipboard
+            navigator.clipboard.writeText(publicUrl);
+            alert("Quote link generated and copied to clipboard!");
+        } catch (error) {
+            console.error('Error generating quote link:', error);
+            alert('Failed to generate quote link');
+        } finally {
+            setGeneratingLink(false);
+        }
+    };
+
     const applySuggestion = (index: number, match: any) => {
         const newItems = [...lineItems];
+        const originalItem = newItems[index];
+        
         newItems[index] = {
             ...newItems[index],
             sku: match.catalog_item.sku,
@@ -119,7 +230,10 @@ export const QuoteReview = () => {
                 ...newItems[index].metadata,
                 matched_catalog_id: match.catalog_item.id,
                 match_score: match.score,
-                match_type: match.match_type
+                match_type: match.match_type,
+                matched_catalog_cost_price: match.catalog_item.cost_price,
+                original_cost_price: originalItem.metadata?.matched_catalog_cost_price || 
+                                    (originalItem.unit_price * 0.7)
             }
         };
         // Recalculate total
@@ -127,6 +241,15 @@ export const QuoteReview = () => {
         
         setLineItems(newItems);
         setShowSuggestions({...showSuggestions, [index]: false});
+        
+        // Track optimization
+        if (match.catalog_item.cost_price) {
+            setOptimizedItems({...optimizedItems, [index]: match});
+        }
+    };
+
+    const swapAndOptimize = (index: number, match: any) => {
+        applySuggestion(index, match);
     };
 
     const applyAllBestMatches = () => {
@@ -207,6 +330,20 @@ export const QuoteReview = () => {
                         <Copy size={18} /> Copy for ERP
                     </button>
                     <button 
+                        onClick={generateQuoteLink}
+                        disabled={generatingLink}
+                        className="btn-secondary flex items-center gap-2 bg-blue-600 hover:bg-blue-500"
+                        title="Generate shareable link for customer approval"
+                    >
+                        <LinkIcon size={18} /> {shareLink ? 'Link Generated' : 'Generate Quote Link'}
+                    </button>
+                    {shareLink && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg">
+                            <CheckCircle2 size={16} className="text-emerald-400" />
+                            <span className="text-xs text-emerald-300">Link ready</span>
+                        </div>
+                    )}
+                    <button 
                         onClick={() => handleSave(false)}
                         disabled={saving}
                         className="btn-secondary flex items-center gap-2"
@@ -223,6 +360,31 @@ export const QuoteReview = () => {
                 </div>
             </div>
 
+            {/* Total Margin Gained Counter - Pinned to Top */}
+            {totalMarginGained > 0 && (
+                <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-500/20 to-green-500/20 border border-emerald-500/30">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-emerald-500/20 rounded-xl">
+                                <DollarSign size={24} className="text-emerald-400" />
+                            </div>
+                            <div>
+                                <div className="text-sm text-emerald-300 font-medium">Total Margin Gained</div>
+                                <div className="text-3xl font-bold text-white">+${totalMarginGained.toFixed(2)}</div>
+                                <div className="text-xs text-emerald-400 mt-1">Additional profit from AI optimizations</div>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setShowMarginOptimizer(!showMarginOptimizer)}
+                            className="btn-secondary flex items-center gap-2"
+                        >
+                            {showMarginOptimizer ? <X size={18} /> : <Zap size={18} />}
+                            {showMarginOptimizer ? 'Hide Optimizer' : 'Show Optimizer'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {quote.metadata?.source_email_id && (
                 <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm flex items-center gap-2">
                     <AlertTriangle size={16} />
@@ -233,169 +395,405 @@ export const QuoteReview = () => {
                 </div>
             )}
 
-            <div className="glass-panel rounded-2xl overflow-hidden">
-                <div className="p-6 border-b border-slate-700/50 flex justify-between items-center">
-                    <div>
-                        <h3 className="text-lg font-semibold text-white mb-1">Line Items</h3>
-                        <p className="text-slate-400 text-sm">Review and edit extracted items</p>
-                    </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                        <thead>
-                            <tr className="bg-slate-800/30 text-slate-400 border-b border-slate-700/50">
-                                <th className="px-6 py-4 w-1/4">Description</th>
-                                <th className="px-6 py-4 w-1/6">SKU</th>
-                                <th className="px-6 py-4 w-24">Qty</th>
-                                <th className="px-6 py-4 w-32">Unit Price</th>
-                                <th className="px-6 py-4 w-32 text-right">Total</th>
-                                <th className="px-6 py-4 w-24 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/50">
-                            {lineItems.map((item, index) => (
-                                <React.Fragment key={index}>
-                                    <tr key={index} className={`group hover:bg-slate-800/30 transition-colors ${
-                                        item.metadata?.match_score ? 'bg-green-500/5' : 
-                                        (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
-                                    }`}>
-                                        <td className="px-6 py-4">
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-center gap-2">
-                                                    <input 
-                                                        type="text" 
-                                                        value={item.description || ''}
-                                                        onChange={(e) => updateItem(index, 'description', e.target.value)}
-                                                        className="bg-transparent border-none w-full text-slate-200 focus:ring-0 p-0 placeholder-slate-600"
-                                                        placeholder="Item description"
-                                                    />
-                                                    {item.margin !== undefined && item.margin < 0.15 && (
-                                                        <TrendingDown size={14} className="text-red-400" title={`Low Margin Alert: ${(item.margin * 100).toFixed(1)}%`} />
-                                                    )}
-                                                </div>
-                                                {item.validation_warnings?.length > 0 && (
-                                                    <div className="flex items-center gap-1 text-[10px] text-amber-400">
-                                                        <Info size={10} />
-                                                        {item.validation_warnings[0]}
-                                                    </div>
-                                                )}
-                                                {suggestions[index] && suggestions[index].length > 0 && (
-                                                    <button 
-                                                        onClick={() => setShowSuggestions({...showSuggestions, [index]: !showSuggestions[index]})}
-                                                        className="text-xs text-blue-400 flex items-center gap-1 hover:text-blue-300 w-fit"
-                                                    >
-                                                        <Lightbulb size={12} />
-                                                        {suggestions[index].length} suggestions found
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <input 
-                                                type="text" 
-                                                value={item.sku || ''}
-                                                onChange={(e) => updateItem(index, 'sku', e.target.value)}
-                                                className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0 placeholder-slate-600"
-                                                placeholder="SKU"
-                                            />
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <input 
-                                                type="number" 
-                                                value={item.quantity}
-                                                onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
-                                                className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
-                                                min="1"
-                                            />
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center">
-                                                <span className="text-slate-500 mr-1">$</span>
-                                                <input 
-                                                    type="number" 
-                                                    value={item.unit_price}
-                                                    onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value))}
-                                                    className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
-                                                    step="0.01"
-                                                />
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-right font-medium text-white">
-                                            ${(Number(item.quantity) * Number(item.unit_price)).toFixed(2)}
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            {item.metadata?.original_extraction?.confidence_score && (
-                                                <div className="flex justify-center" title="Extraction Confidence">
-                                                    <span className={`text-xs px-2 py-1 rounded-full ${
-                                                        item.metadata.original_extraction.confidence_score > 0.8 
-                                                            ? 'bg-emerald-500/10 text-emerald-400' 
-                                                            : item.metadata.original_extraction.confidence_score < 0.7
-                                                                ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                                                : 'bg-amber-500/10 text-amber-400'
-                                                    }`}>
-                                                        {Math.round(item.metadata.original_extraction.confidence_score * 100)}%
-                                                    </span>
-                                                </div>
-                                            )}
-                                        </td>
-                                    </tr>
-                                    {/* Suggestions Row */}
-                                    {showSuggestions[index] && suggestions[index] && (
-                                        <tr className="bg-slate-900/50">
-                                            <td colSpan={6} className="px-6 py-3">
-                                                <div className="text-xs font-semibold text-slate-400 mb-2">Suggested Matches:</div>
-                                                <div className="space-y-2">
-                                                    {suggestions[index].map((match: any, mIdx: number) => (
-                                                        <div key={mIdx} className="flex items-center justify-between bg-slate-800 p-2 rounded border border-slate-700">
-                                                            <div className="flex-1 grid grid-cols-3 gap-4">
-                                                                <div className="text-slate-300">
-                                                                    <span className="text-slate-500 mr-2">SKU:</span>
-                                                                    {match.catalog_item.sku}
-                                                                </div>
-                                                                <div className="text-slate-300 truncate" title={match.catalog_item.item_name}>
-                                                                    {match.catalog_item.item_name}
-                                                                </div>
-                                                                <div className="text-slate-300">
-                                                                    <span className="text-slate-500 mr-2">Price:</span>
-                                                                    ${match.catalog_item.expected_price}
-                                                                </div>
+            {/* Split View: Extracted Data vs AI Recommendations */}
+            {showMarginOptimizer ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left: Extracted Data */}
+                    <div className="glass-panel rounded-2xl overflow-hidden">
+                        <div className="p-6 border-b border-slate-700/50">
+                            <h3 className="text-lg font-semibold text-white mb-1">Extracted Data</h3>
+                            <p className="text-slate-400 text-sm">Original items from source</p>
+                        </div>
+                        <div className="overflow-y-auto max-h-[600px]">
+                            <div className="divide-y divide-slate-800/50">
+                                {lineItems.map((item, index) => {
+                                    const highMarginAlt = findHighMarginAlternatives(item, suggestions[index]);
+                                    const specCheck = checkSpecCompliance(item, quote.metadata?.tender_requirements);
+                                    const currentMargin = calculateMargin(item);
+                                    
+                                    return (
+                                        <div key={index} className={`p-4 hover:bg-slate-800/30 transition-colors ${
+                                            highMarginAlt ? 'bg-amber-500/5 border-l-2 border-amber-500/50' : ''
+                                        }`}>
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <div className="flex-1">
+                                                            <div className="text-sm font-medium text-white mb-1">
+                                                                {item.description || item.item_name || 'Unnamed Item'}
                                                             </div>
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">
-                                                                    {match.match_type?.replace('_', ' ')}
-                                                                </span>
-                                                                <span className={`text-xs px-2 py-0.5 rounded ${
-                                                                    match.score > 0.8 ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'
-                                                                }`}>
-                                                                    {Math.round(match.score * 100)}% Match
-                                                                </span>
-                                                                <button 
-                                                                    onClick={() => applySuggestion(index, match)}
-                                                                    className="btn-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs flex items-center gap-1"
-                                                                >
-                                                                    <Check size={12} /> Apply
-                                                                </button>
+                                                            <div className="flex items-center gap-3 text-xs text-slate-400">
+                                                                <span>SKU: {item.sku || 'N/A'}</span>
+                                                                <span>•</span>
+                                                                <span>Qty: {item.quantity}</span>
+                                                                <span>•</span>
+                                                                <span>${item.unit_price?.toFixed(2)}/unit</span>
                                                             </div>
                                                         </div>
-                                                    ))}
+                                                        {/* Spec Compliance Badge */}
+                                                        {specCheck && (
+                                                            <div className="flex-shrink-0">
+                                                                {specCheck.compliant ? (
+                                                                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title={specCheck.reason}>
+                                                                        <Shield size={12} />
+                                                                        <span className="text-xs">Compliant</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 text-red-400 border border-red-500/20" title={specCheck.reason}>
+                                                                        <AlertTriangle size={12} />
+                                                                        <span className="text-xs">Non-Compliant</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    {/* Semantic SKU Matcher Display */}
+                                                    {item.metadata?.original_extraction && (
+                                                        <div className="mt-2 p-2 bg-slate-900/50 rounded text-xs">
+                                                            <div className="text-slate-500 mb-1">Extracted Input:</div>
+                                                            <div className="text-slate-300 font-mono">
+                                                                "{item.metadata.original_extraction.item_name || item.metadata.original_extraction.description || 'N/A'}"
+                                                            </div>
+                                                            {item.sku && item.metadata?.matched_catalog_id && (
+                                                                <>
+                                                                    <div className="text-slate-500 mt-2 mb-1">Mapped to ERP SKU:</div>
+                                                                    <div className="text-emerald-400 font-mono font-semibold">
+                                                                        {item.sku}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Margin Indicator */}
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        <span className="text-xs text-slate-500">Margin:</span>
+                                                        <span className={`text-xs font-medium ${
+                                                            currentMargin > 20 ? 'text-emerald-400' : 
+                                                            currentMargin > 10 ? 'text-amber-400' : 'text-red-400'
+                                                        }`}>
+                                                            {currentMargin.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    {/* High Margin Alternative Alert */}
+                                                    {highMarginAlt && (
+                                                        <div className="mt-3 p-3 bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 rounded-lg">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <Zap size={14} className="text-amber-400" />
+                                                                <span className="text-sm font-semibold text-amber-300">Margin Optimization Available</span>
+                                                            </div>
+                                                            <div className="text-xs text-amber-200/80 mb-2">
+                                                                We found a cheaper Private Label alternative that increases margin by +{(
+                                                                    ((highMarginAlt.catalog_item.expected_price - (highMarginAlt.catalog_item.cost_price || highMarginAlt.catalog_item.expected_price * 0.7)) / highMarginAlt.catalog_item.expected_price * 100) - currentMargin
+                                                                ).toFixed(1)}%
+                                                            </div>
+                                                            <button
+                                                                onClick={() => swapAndOptimize(index, highMarginAlt)}
+                                                                className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1 w-full justify-center"
+                                                            >
+                                                                <TrendingUp size={12} />
+                                                                Swap & Optimize
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    )}
-                                </React.Fragment>
-                            ))}
-                            <tr className="bg-slate-800/50 font-bold">
-                                <td colSpan={4} className="px-6 py-4 text-right text-slate-300">Total Amount:</td>
-                                <td className="px-6 py-4 text-right text-white text-lg">
-                                    ${calculateTotal().toFixed(2)}
-                                </td>
-                                <td></td>
-                            </tr>
-                        </tbody>
-                    </table>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Right: AI Recommendations */}
+                    <div className="glass-panel rounded-2xl overflow-hidden">
+                        <div className="p-6 border-b border-slate-700/50">
+                            <h3 className="text-lg font-semibold text-white mb-1 flex items-center gap-2">
+                                <Lightbulb size={20} className="text-yellow-400" />
+                                AI Recommendations
+                            </h3>
+                            <p className="text-slate-400 text-sm">High-margin alternatives and optimizations</p>
+                        </div>
+                        <div className="overflow-y-auto max-h-[600px] p-4 space-y-4">
+                            {lineItems.map((item, index) => {
+                                const matches = suggestions[index] || [];
+                                const highMarginAlt = findHighMarginAlternatives(item, matches);
+                                
+                                if (!highMarginAlt && matches.length === 0) {
+                                    return null;
+                                }
+                                
+                                const currentMargin = calculateMargin(item);
+                                const altMargin = highMarginAlt ? 
+                                    ((highMarginAlt.catalog_item.expected_price - (highMarginAlt.catalog_item.cost_price || highMarginAlt.catalog_item.expected_price * 0.7)) / highMarginAlt.catalog_item.expected_price * 100) : 0;
+                                const marginGain = altMargin - currentMargin;
+                                
+                                return (
+                                    <div key={index} className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                                        <div className="text-sm font-medium text-white mb-2">
+                                            {item.description || `Item ${index + 1}`}
+                                        </div>
+                                        
+                                        {highMarginAlt ? (
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-semibold text-emerald-400">Recommended Alternative</span>
+                                                        <span className="text-xs px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded">
+                                                            +{marginGain.toFixed(1)}% margin
+                                                        </span>
+                                                    </div>
+                                                    <div className="space-y-1 text-xs">
+                                                        <div className="flex justify-between">
+                                                            <span className="text-slate-400">SKU:</span>
+                                                            <span className="text-white font-mono">{highMarginAlt.catalog_item.sku}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span className="text-slate-400">Name:</span>
+                                                            <span className="text-white">{highMarginAlt.catalog_item.item_name}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span className="text-slate-400">Price:</span>
+                                                            <span className="text-white">${highMarginAlt.catalog_item.expected_price?.toFixed(2)}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span className="text-slate-400">Margin:</span>
+                                                            <span className="text-emerald-400 font-semibold">{altMargin.toFixed(1)}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => swapAndOptimize(index, highMarginAlt)}
+                                                        className="mt-3 w-full btn-primary text-xs py-2 flex items-center justify-center gap-2"
+                                                    >
+                                                        <ArrowRight size={14} />
+                                                        Apply This Alternative
+                                                    </button>
+                                                </div>
+                                                
+                                                {matches.length > 1 && (
+                                                    <details className="text-xs">
+                                                        <summary className="text-slate-400 cursor-pointer hover:text-slate-300">
+                                                            View {matches.length - 1} more alternatives
+                                                        </summary>
+                                                        <div className="mt-2 space-y-2">
+                                                            {matches.slice(1, 4).map((match: any, mIdx: number) => (
+                                                                <div key={mIdx} className="p-2 bg-slate-900/50 rounded border border-slate-700/30">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div>
+                                                                            <div className="text-slate-300 font-mono text-xs">{match.catalog_item.sku}</div>
+                                                                            <div className="text-slate-400 text-xs truncate max-w-[200px]">{match.catalog_item.item_name}</div>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => applySuggestion(index, match)}
+                                                                            className="btn-secondary text-xs py-1 px-2"
+                                                                        >
+                                                                            Use
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </details>
+                                                )}
+                                            </div>
+                                        ) : matches.length > 0 ? (
+                                            <div className="text-xs text-slate-400">
+                                                {matches.length} match(es) found, but no significant margin improvement available.
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                );
+                            })}
+                            
+                            {lineItems.every((item, index) => !suggestions[index] || suggestions[index].length === 0) && (
+                                <div className="text-center py-8 text-slate-500 text-sm">
+                                    No recommendations available yet. Suggestions will appear after analysis.
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
-            </div>
+            ) : (
+                <div className="glass-panel rounded-2xl overflow-hidden">
+                    <div className="p-6 border-b border-slate-700/50 flex justify-between items-center">
+                        <div>
+                            <h3 className="text-lg font-semibold text-white mb-1">Line Items</h3>
+                            <p className="text-slate-400 text-sm">Review and edit extracted items</p>
+                        </div>
+                    </div>
+                    
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead>
+                                <tr className="bg-slate-800/30 text-slate-400 border-b border-slate-700/50">
+                                    <th className="px-6 py-4 w-1/4">Description</th>
+                                    <th className="px-6 py-4 w-1/6">SKU</th>
+                                    <th className="px-6 py-4 w-24">Qty</th>
+                                    <th className="px-6 py-4 w-32">Unit Price</th>
+                                    <th className="px-6 py-4 w-32 text-right">Total</th>
+                                    <th className="px-6 py-4 w-24 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/50">
+                                {lineItems.map((item, index) => {
+                                    const specCheck = checkSpecCompliance(item, quote.metadata?.tender_requirements);
+                                    const currentMargin = calculateMargin(item);
+                                    
+                                    return (
+                                        <React.Fragment key={index}>
+                                            <tr className={`group hover:bg-slate-800/30 transition-colors ${
+                                                item.metadata?.match_score ? 'bg-green-500/5' : 
+                                                (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
+                                            }`}>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="text" 
+                                                                value={item.description || ''}
+                                                                onChange={(e) => updateItem(index, 'description', e.target.value)}
+                                                                className="bg-transparent border-none w-full text-slate-200 focus:ring-0 p-0 placeholder-slate-600"
+                                                                placeholder="Item description"
+                                                            />
+                                                            {currentMargin < 10 && (
+                                                                <TrendingDown size={14} className="text-red-400" title={`Low Margin: ${currentMargin.toFixed(1)}%`} />
+                                                            )}
+                                                            {specCheck && (
+                                                                specCheck.compliant ? (
+                                                                    <Shield size={14} className="text-emerald-400" title={specCheck.reason} />
+                                                                ) : (
+                                                                    <AlertTriangle size={14} className="text-red-400" title={specCheck.reason} />
+                                                                )
+                                                            )}
+                                                        </div>
+                                                        {item.metadata?.original_extraction && (
+                                                            <div className="text-[10px] text-slate-500">
+                                                                Extracted: "{item.metadata.original_extraction.item_name || item.metadata.original_extraction.description || 'N/A'}"
+                                                                {item.sku && item.metadata?.matched_catalog_id && (
+                                                                    <span className="text-emerald-400 ml-2">→ {item.sku}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {suggestions[index] && suggestions[index].length > 0 && (
+                                                            <button 
+                                                                onClick={() => setShowSuggestions({...showSuggestions, [index]: !showSuggestions[index]})}
+                                                                className="text-xs text-blue-400 flex items-center gap-1 hover:text-blue-300 w-fit"
+                                                            >
+                                                                <Lightbulb size={12} />
+                                                                {suggestions[index].length} suggestions found
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <input 
+                                                        type="text" 
+                                                        value={item.sku || ''}
+                                                        onChange={(e) => updateItem(index, 'sku', e.target.value)}
+                                                        className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0 placeholder-slate-600"
+                                                        placeholder="SKU"
+                                                    />
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <input 
+                                                        type="number" 
+                                                        value={item.quantity}
+                                                        onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
+                                                        className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
+                                                        min="1"
+                                                    />
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center">
+                                                        <span className="text-slate-500 mr-1">$</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={item.unit_price}
+                                                            onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value))}
+                                                            className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
+                                                            step="0.01"
+                                                        />
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right font-medium text-white">
+                                                    ${(Number(item.quantity) * Number(item.unit_price)).toFixed(2)}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    {item.metadata?.original_extraction?.confidence_score && (
+                                                        <div className="flex justify-center" title="Extraction Confidence">
+                                                            <span className={`text-xs px-2 py-1 rounded-full ${
+                                                                item.metadata.original_extraction.confidence_score > 0.8 
+                                                                    ? 'bg-emerald-500/10 text-emerald-400' 
+                                                                    : item.metadata.original_extraction.confidence_score < 0.7
+                                                                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                                                        : 'bg-amber-500/10 text-amber-400'
+                                                            }`}>
+                                                                {Math.round(item.metadata.original_extraction.confidence_score * 100)}%
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Suggestions Row */}
+                                            {showSuggestions[index] && suggestions[index] && (
+                                                <tr className="bg-slate-900/50">
+                                                    <td colSpan={6} className="px-6 py-3">
+                                                        <div className="text-xs font-semibold text-slate-400 mb-2">Suggested Matches:</div>
+                                                        <div className="space-y-2">
+                                                            {suggestions[index].map((match: any, mIdx: number) => (
+                                                                <div key={mIdx} className="flex items-center justify-between bg-slate-800 p-2 rounded border border-slate-700">
+                                                                    <div className="flex-1 grid grid-cols-3 gap-4">
+                                                                        <div className="text-slate-300">
+                                                                            <span className="text-slate-500 mr-2">SKU:</span>
+                                                                            {match.catalog_item.sku}
+                                                                        </div>
+                                                                        <div className="text-slate-300 truncate" title={match.catalog_item.item_name}>
+                                                                            {match.catalog_item.item_name}
+                                                                        </div>
+                                                                        <div className="text-slate-300">
+                                                                            <span className="text-slate-500 mr-2">Price:</span>
+                                                                            ${match.catalog_item.expected_price}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">
+                                                                            {match.match_type?.replace('_', ' ')}
+                                                                        </span>
+                                                                        <span className={`text-xs px-2 py-0.5 rounded ${
+                                                                            match.score > 0.8 ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'
+                                                                        }`}>
+                                                                            {Math.round(match.score * 100)}% Match
+                                                                        </span>
+                                                                        <button 
+                                                                            onClick={() => applySuggestion(index, match)}
+                                                                            className="btn-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs flex items-center gap-1"
+                                                                        >
+                                                                            <Check size={12} /> Apply
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                                <tr className="bg-slate-800/50 font-bold">
+                                    <td colSpan={4} className="px-6 py-4 text-right text-slate-300">Total Amount:</td>
+                                    <td className="px-6 py-4 text-right text-white text-lg">
+                                        ${calculateTotal().toFixed(2)}
+                                    </td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
