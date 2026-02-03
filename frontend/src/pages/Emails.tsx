@@ -7,6 +7,7 @@ export const Emails = () => {
     const navigate = useNavigate();
     const [emails, setEmails] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState<string>('');
     const [emailQuotes, setEmailQuotes] = useState<{[key: string]: any[]}>({});
     const [loadingQuotes, setLoadingQuotes] = useState<{[key: string]: boolean}>({});
@@ -19,9 +20,10 @@ export const Emails = () => {
 
     const fetchEmails = () => {
         setLoading(true);
+        setError(null);
         emailsApi.list(statusFilter)
             .then(res => {
-                const emailList = res.data.emails || [];
+                const emailList = res.data?.emails || [];
                 setEmails(emailList);
                 // Fetch quotes for processed emails
                 emailList.forEach((email: any) => {
@@ -30,7 +32,10 @@ export const Emails = () => {
                     }
                 });
             })
-            .catch(console.error)
+            .catch(err => {
+                console.error('Failed to load emails:', err);
+                setError('Unable to load inbox. Check that the backend is running and try again.');
+            })
             .finally(() => setLoading(false));
     };
 
@@ -241,6 +246,13 @@ export const Emails = () => {
                         <tbody className="divide-y divide-slate-800/50">
                             {loading ? (
                                 <tr><td colSpan={7} className="text-center py-8 text-slate-500">Loading...</td></tr>
+                            ) : error ? (
+                                <tr>
+                                    <td colSpan={7} className="text-center py-8">
+                                        <p className="text-red-600 mb-4">{error}</p>
+                                        <button onClick={fetchEmails} className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">Retry</button>
+                                    </td>
+                                </tr>
                             ) : emails.length === 0 ? (
                                 <tr><td colSpan={7} className="text-center py-8 text-slate-500">No emails found.</td></tr>
                             ) : (

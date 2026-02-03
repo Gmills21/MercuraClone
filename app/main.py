@@ -51,6 +51,7 @@ from app.routes import impact
 from app.routes import onboarding
 from app.routes import extraction_unified
 from app.routes import knowledge_base
+from app.routes import billing
 
 # Create FastAPI app
 app = FastAPI(
@@ -90,6 +91,7 @@ app.include_router(image_extract.router)  # Legacy - redirects to unified
 app.include_router(impact.router)
 app.include_router(onboarding.router)
 app.include_router(knowledge_base.router)  # Optional feature
+app.include_router(billing.router)  # B2B subscription management
 
 # Serve frontend static files
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

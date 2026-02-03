@@ -6,8 +6,12 @@ const API_URL = 'http://localhost:8000';
 // In a real app, this would come from AuthContext
 const TEST_USER_ID = '3d4df718-47c3-4903-b09e-711090412204'; // UUID format
 
+// Timeout so hung requests (backend down, CORS, network) don't leave tabs spinning forever
+const REQUEST_TIMEOUT_MS = 20000;
+
 export const api = axios.create({
     baseURL: API_URL,
+    timeout: REQUEST_TIMEOUT_MS,
     headers: {
         'Content-Type': 'application/json',
         'X-User-ID': TEST_USER_ID,
@@ -60,7 +64,7 @@ export const emailsApi = {
 export const quotesApiExtended = {
     ...quotesApi,
     getByEmail: (emailId: string) => api.get(`/quotes/email/${emailId}`),
-    generateExport: (quoteId: string, format: 'excel' | 'pdf' = 'excel') => 
+    generateExport: (quoteId: string, format: 'excel' | 'pdf' = 'excel') =>
         api.get(`/quotes/${quoteId}/generate-export?format=${format}`, { responseType: 'blob' }),
     draftReply: (quoteId: string) => api.post(`/quotes/${quoteId}/draft-reply`),
     generateLink: (quoteId: string) => api.post(`/quotes/${quoteId}/generate-link`),
@@ -111,4 +115,27 @@ export const knowledgeBaseApi = {
         });
     },
     listDocuments: () => api.get('/knowledge/documents'),
+};
+
+// Billing API
+export const billingApi = {
+    getPlans: () => api.get('/billing/plans'),
+    getSubscription: () => api.get('/billing/subscription'),
+    updateSubscription: (data: any) => api.post('/billing/subscription/update', data),
+    cancelSubscription: (cancelAtPeriodEnd: boolean = true) =>
+        api.post('/billing/subscription/cancel', { cancel_at_period_end: cancelAtPeriodEnd }),
+    createCheckoutSession: (data: any) => api.post('/billing/checkout/create-session', data),
+    createBillingPortalSession: (returnUrl: string) =>
+        api.post('/billing/portal/create-session', { return_url: returnUrl }),
+    getInvoices: () => api.get('/billing/invoices'),
+    getInvoice: (invoiceId: string) => api.get(`/billing/invoices/${invoiceId}`),
+    getSeats: () => api.get('/billing/seats'),
+    assignSeat: (email: string, name?: string) =>
+        api.post('/billing/seats/assign', { sales_rep_email: email, sales_rep_name: name }),
+    deactivateSeat: (seatId: string) => api.post(`/billing/seats/${seatId}/deactivate`),
+    getUsage: () => api.get('/billing/usage'),
+};
+
+export const quickbooksApi = {
+    exportQuote: (quoteId: string) => api.post(`/quickbooks/export-quote?quote_id=${quoteId}`),
 };

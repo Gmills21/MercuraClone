@@ -1,72 +1,96 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+    darkMode: ["class"],
     content: [
         "./index.html",
         "./src/**/*.{js,ts,jsx,tsx}",
         "./components/**/*.{js,ts,jsx,tsx}",
     ],
     theme: {
+        container: {
+            center: true,
+            padding: "2rem",
+            screens: {
+                "2xl": "1400px",
+            },
+        },
         extend: {
             colors: {
+                border: "hsl(var(--border))",
+                input: "hsl(var(--input))",
+                ring: "hsl(var(--ring))",
+                background: "hsl(var(--background))",
+                foreground: "hsl(var(--foreground))",
                 primary: {
-                    50: '#f8fafc',
-                    100: '#f1f5f9',
-                    200: '#e2e8f0',
-                    300: '#cbd5e1',
-                    400: '#94a3b8',
-                    500: '#64748b', // Zinc-inspired, professional
-                    600: '#475569',
-                    700: '#334155',
-                    800: '#1e293b',
-                    900: '#0f172a',
+                    DEFAULT: "hsl(var(--primary))",
+                    foreground: "hsl(var(--primary-foreground))",
+                    50: '#fff7ed',
+                    100: '#ffedd5',
+                    200: '#fed7aa',
+                    300: '#fdba74',
+                    400: '#fb923c',
+                    500: '#f97316',
+                    600: '#ea580c',
+                    700: '#c2410c',
+                    800: '#9a3412',
+                    900: '#7c2d12',
                 },
-                zinc: {
-                    50: '#fafafa',
-                    100: '#f4f4f5',
-                    200: '#e4e4e7',
-                    300: '#d4d4d8',
-                    400: '#a1a1aa',
-                    500: '#71717a',
-                    600: '#52525b',
-                    700: '#3f3f46',
-                    800: '#27272a',
-                    900: '#18181b',
+                secondary: {
+                    DEFAULT: "hsl(var(--secondary))",
+                    foreground: "hsl(var(--secondary-foreground))",
+                },
+                destructive: {
+                    DEFAULT: "hsl(var(--destructive))",
+                    foreground: "hsl(var(--destructive-foreground))",
+                },
+                muted: {
+                    DEFAULT: "hsl(var(--muted))",
+                    foreground: "hsl(var(--muted-foreground))",
                 },
                 accent: {
-                    500: '#22d3ee', // Cyan accent for highlights
+                    DEFAULT: "hsl(var(--accent))",
+                    foreground: "hsl(var(--accent-foreground))",
                 },
-                background: '#0f172a',
-                foreground: '#f8fafc',
-                muted: '#1e293b',
-                border: '#334155',
-            },
-            fontFamily: {
-                sans: ['Inter', 'Segoe UI', 'sans-serif'],
-                display: ['Poppins', 'Inter', 'Segoe UI', 'sans-serif'],
+                popover: {
+                    DEFAULT: "hsl(var(--popover))",
+                    foreground: "hsl(var(--popover-foreground))",
+                },
+                card: {
+                    DEFAULT: "hsl(var(--card))",
+                    foreground: "hsl(var(--card-foreground))",
+                },
             },
             borderRadius: {
-                lg: '1rem',
-                xl: '1.5rem',
+                lg: "var(--radius)",
+                md: "calc(var(--radius) - 2px)",
+                sm: "calc(var(--radius) - 4px)",
+                xl: "1rem",
+                "2xl": "1.5rem",
+                "3xl": "2rem",
             },
-            boxShadow: {
-                card: '0 4px 32px 0 rgba(16, 30, 54, 0.10)',
-                b2b: '0 2px 8px 0 rgba(40, 60, 90, 0.08)',
-            },
-            animation: {
-                'fade-in': 'fadeIn 0.5s ease-out',
-                'slide-up': 'slideUp 0.5s ease-out',
+            fontFamily: {
+                sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
             },
             keyframes: {
+                "accordion-down": {
+                    from: { height: "0" },
+                    to: { height: "var(--radix-accordion-content-height)" },
+                },
+                "accordion-up": {
+                    from: { height: "var(--radix-accordion-content-height)" },
+                    to: { height: "0" },
+                },
                 fadeIn: {
                     '0%': { opacity: '0' },
                     '100%': { opacity: '1' },
                 },
-                slideUp: {
-                    '0%': { transform: 'translateY(20px)', opacity: '0' },
-                    '100%': { transform: 'translateY(0)', opacity: '1' },
-                }
-            }
+            },
+            animation: {
+                "accordion-down": "accordion-down 0.2s ease-out",
+                "accordion-up": "accordion-up 0.2s ease-out",
+                'fade-in': 'fadeIn 0.5s ease-out',
+            },
         },
     },
-    plugins: [],
+    plugins: [require("tailwindcss-animate")],
 }

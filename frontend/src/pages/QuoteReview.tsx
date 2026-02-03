@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { quotesApi, productsApi, quotesApiExtended } from '../services/api';
-import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles } from 'lucide-react';
+import { quotesApi, productsApi, quotesApiExtended, quickbooksApi } from '../services/api';
+import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
 
 export const QuoteReview = () => {
     const { id } = useParams();
@@ -10,12 +10,13 @@ export const QuoteReview = () => {
     const [lineItems, setLineItems] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    
+    const [syncingQB, setSyncingQB] = useState(false);
+
     // Suggestions state
-    const [suggestions, setSuggestions] = useState<{[key: number]: any[]}>({});
-    const [showSuggestions, setShowSuggestions] = useState<{[key: number]: boolean}>({});
+    const [suggestions, setSuggestions] = useState<{ [key: number]: any[] }>({});
+    const [showSuggestions, setShowSuggestions] = useState<{ [key: number]: boolean }>({});
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-    const [optimizedItems, setOptimizedItems] = useState<{[key: number]: any}>({});
+    const [optimizedItems, setOptimizedItems] = useState<{ [key: number]: any }>({});
     const [showMarginOptimizer, setShowMarginOptimizer] = useState(true);
     const [shareLink, setShareLink] = useState<string | null>(null);
     const [generatingLink, setGeneratingLink] = useState(false);
@@ -32,7 +33,7 @@ export const QuoteReview = () => {
             const res = await quotesApi.get(quoteId);
             setQuote(res.data);
             setLineItems(res.data.items || []);
-            
+
             // Fetch suggestions if it's a draft
             if (res.data.status === 'draft' && res.data.items?.length > 0) {
                 fetchSuggestions(res.data.items);
@@ -59,11 +60,11 @@ export const QuoteReview = () => {
     const updateItem = (index: number, field: string, value: any) => {
         const newItems = [...lineItems];
         newItems[index] = { ...newItems[index], [field]: value };
-        
+
         if (field === 'quantity' || field === 'unit_price') {
-             const qty = field === 'quantity' ? value : newItems[index].quantity;
-             const price = field === 'unit_price' ? value : newItems[index].unit_price;
-             newItems[index].total_price = Number(qty) * Number(price);
+            const qty = field === 'quantity' ? value : newItems[index].quantity;
+            const price = field === 'unit_price' ? value : newItems[index].unit_price;
+            newItems[index].total_price = Number(qty) * Number(price);
         }
         setLineItems(newItems);
     };
@@ -76,9 +77,9 @@ export const QuoteReview = () => {
     const calculateMargin = (item: any) => {
         if (!item.unit_price || item.unit_price === 0) return 0;
         // If we have cost_price from catalog match, use it
-        const costPrice = item.metadata?.matched_catalog_cost_price || 
-                         item.metadata?.original_cost_price || 
-                         (item.unit_price * 0.7); // Default 30% margin assumption
+        const costPrice = item.metadata?.matched_catalog_cost_price ||
+            item.metadata?.original_cost_price ||
+            (item.unit_price * 0.7); // Default 30% margin assumption
         return ((item.unit_price - costPrice) / item.unit_price) * 100;
     };
 
@@ -107,25 +108,25 @@ export const QuoteReview = () => {
     // Find high-margin alternatives for each item
     const findHighMarginAlternatives = (item: any, matches: any[]) => {
         if (!matches || matches.length === 0) return null;
-        
+
         const currentMargin = calculateMargin(item);
         const currentCost = item.unit_price * (1 - currentMargin / 100);
-        
+
         // Find alternatives with better margin or lower cost
         return matches.filter(match => {
             const matchPrice = match.catalog_item.expected_price || 0;
             const matchCost = match.catalog_item.cost_price || (matchPrice * 0.7);
             const matchMargin = matchPrice > 0 ? ((matchPrice - matchCost) / matchPrice) * 100 : 0;
-            
+
             // Consider it a good alternative if:
             // 1. Margin is at least 5% better, OR
             // 2. Cost is at least 10% lower with similar margin
-            return (matchMargin > currentMargin + 5) || 
-                   (matchCost < currentCost * 0.9 && matchMargin >= currentMargin - 2);
+            return (matchMargin > currentMargin + 5) ||
+                (matchCost < currentCost * 0.9 && matchMargin >= currentMargin - 2);
         }).sort((a, b) => {
-            const marginA = a.catalog_item.expected_price > 0 ? 
+            const marginA = a.catalog_item.expected_price > 0 ?
                 ((a.catalog_item.expected_price - (a.catalog_item.cost_price || a.catalog_item.expected_price * 0.7)) / a.catalog_item.expected_price) * 100 : 0;
-            const marginB = b.catalog_item.expected_price > 0 ? 
+            const marginB = b.catalog_item.expected_price > 0 ?
                 ((b.catalog_item.expected_price - (b.catalog_item.cost_price || b.catalog_item.expected_price * 0.7)) / b.catalog_item.expected_price) * 100 : 0;
             return marginB - marginA;
         })[0]; // Return best match
@@ -134,22 +135,22 @@ export const QuoteReview = () => {
     // Check spec compliance (simplified - checks for common spec keywords)
     const checkSpecCompliance = (item: any, requirements?: string[]) => {
         if (!requirements || requirements.length === 0) return { compliant: true, reason: 'No requirements specified' };
-        
+
         const description = (item.description || item.item_name || '').toLowerCase();
         const sku = (item.sku || '').toLowerCase();
         const searchText = `${description} ${sku}`;
-        
+
         const missingSpecs: string[] = [];
         requirements.forEach(req => {
             const reqLower = req.toLowerCase();
             // Check for common spec patterns
-            if (!searchText.includes(reqLower) && 
+            if (!searchText.includes(reqLower) &&
                 !searchText.includes(reqLower.replace(/\s+/g, '')) &&
                 !searchText.includes(reqLower.replace(/\s+/g, '-'))) {
                 missingSpecs.push(req);
             }
         });
-        
+
         return {
             compliant: missingSpecs.length === 0,
             missingSpecs,
@@ -161,11 +162,11 @@ export const QuoteReview = () => {
         try {
             setSaving(true);
             const total = calculateTotal();
-            
+
             const updateData = {
                 ...quote,
                 total_amount: total,
-                status: approve ? 'pending_approval' : quote.status,
+                status: approve ? 'approved' : quote.status,
                 items: lineItems.map(item => ({
                     ...item,
                     total_price: Number(item.quantity) * Number(item.unit_price)
@@ -173,11 +174,10 @@ export const QuoteReview = () => {
             };
 
             await quotesApi.update(id!, updateData);
-            
+
+            fetchQuote(id!);
             if (approve) {
-                navigate('/quotes');
-            } else {
-                fetchQuote(id!);
+                alert('Quote approved! You can now sink to QuickBooks.');
             }
         } catch (error) {
             console.error('Error updating quote:', error);
@@ -187,25 +187,44 @@ export const QuoteReview = () => {
         }
     };
 
+    const handleSyncToQuickBooks = async () => {
+        if (!id) return;
+        setSyncingQB(true);
+        try {
+            await quickbooksApi.exportQuote(id);
+            alert('Safely synced to QuickBooks as an Estimate!');
+        } catch (error: any) {
+            console.error('QuickBooks sync failed:', error);
+            if (error.response?.status === 401) {
+                alert('QuickBooks is not connected. Please connect in the setup page.');
+                navigate('/quickbooks');
+            } else {
+                alert('Failed to sync to QuickBooks: ' + (error.response?.data?.detail || error.message));
+            }
+        } finally {
+            setSyncingQB(false);
+        }
+    };
+
     const copyForERP = () => {
         const header = "SKU\tDescription\tQuantity\tPrice";
-        const rows = lineItems.map(item => 
+        const rows = lineItems.map(item =>
             `${item.sku || ''}\t${item.description || ''}\t${item.quantity || 1}\t${item.unit_price || 0}`
         ).join('\n');
-        
+
         navigator.clipboard.writeText(`${header}\n${rows}`);
         alert("Quote copied to clipboard in ERP-ready Tab-Separated format!");
     };
 
     const generateQuoteLink = async () => {
         if (!id) return;
-        
+
         try {
             setGeneratingLink(true);
             const res = await quotesApiExtended.generateLink(id);
             const publicUrl = res.data.public_url;
             setShareLink(publicUrl);
-            
+
             // Copy to clipboard
             navigator.clipboard.writeText(publicUrl);
             alert("Quote link generated and copied to clipboard!");
@@ -220,7 +239,7 @@ export const QuoteReview = () => {
     const applySuggestion = (index: number, match: any) => {
         const newItems = [...lineItems];
         const originalItem = newItems[index];
-        
+
         newItems[index] = {
             ...newItems[index],
             sku: match.catalog_item.sku,
@@ -232,19 +251,19 @@ export const QuoteReview = () => {
                 match_score: match.score,
                 match_type: match.match_type,
                 matched_catalog_cost_price: match.catalog_item.cost_price,
-                original_cost_price: originalItem.metadata?.matched_catalog_cost_price || 
-                                    (originalItem.unit_price * 0.7)
+                original_cost_price: originalItem.metadata?.matched_catalog_cost_price ||
+                    (originalItem.unit_price * 0.7)
             }
         };
         // Recalculate total
         newItems[index].total_price = Number(newItems[index].quantity) * Number(newItems[index].unit_price);
-        
+
         setLineItems(newItems);
-        setShowSuggestions({...showSuggestions, [index]: false});
-        
+        setShowSuggestions({ ...showSuggestions, [index]: false });
+
         // Track optimization
         if (match.catalog_item.cost_price) {
-            setOptimizedItems({...optimizedItems, [index]: match});
+            setOptimizedItems({ ...optimizedItems, [index]: match });
         }
     };
 
@@ -255,7 +274,7 @@ export const QuoteReview = () => {
     const applyAllBestMatches = () => {
         const newItems = [...lineItems];
         let appliedCount = 0;
-        
+
         Object.entries(suggestions).forEach(([idxStr, matches]) => {
             const idx = parseInt(idxStr);
             if (matches && matches.length > 0) {
@@ -278,7 +297,7 @@ export const QuoteReview = () => {
                 }
             }
         });
-        
+
         if (appliedCount > 0) {
             setLineItems(newItems);
             alert(`Applied ${appliedCount} best matches automatically.`);
@@ -304,7 +323,10 @@ export const QuoteReview = () => {
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                         {quote.quote_number}
-                        <span className="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700 uppercase">
+                        <span className={`text-xs px-2 py-1 rounded-full uppercase border ${quote.status === 'approved'
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}>
                             {quote.status.replace('_', ' ')}
                         </span>
                     </h1>
@@ -314,7 +336,7 @@ export const QuoteReview = () => {
                 </div>
                 <div className="ml-auto flex gap-3">
                     {Object.keys(suggestions).length > 0 && (
-                        <button 
+                        <button
                             onClick={applyAllBestMatches}
                             className="btn-secondary flex items-center gap-2"
                             title="Apply best matches for all items (>60% confidence)"
@@ -322,41 +344,56 @@ export const QuoteReview = () => {
                             <Lightbulb size={18} className="text-yellow-400" /> Auto-Match
                         </button>
                     )}
-                    <button 
-                        onClick={copyForERP}
-                        className="btn-secondary flex items-center gap-2"
-                        title="Copy to clipboard for ERP paste"
-                    >
-                        <Copy size={18} /> Copy for ERP
-                    </button>
-                    <button 
-                        onClick={generateQuoteLink}
-                        disabled={generatingLink}
-                        className="btn-secondary flex items-center gap-2 bg-blue-600 hover:bg-blue-500"
-                        title="Generate shareable link for customer approval"
-                    >
-                        <LinkIcon size={18} /> {shareLink ? 'Link Generated' : 'Generate Quote Link'}
-                    </button>
-                    {shareLink && (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg">
-                            <CheckCircle2 size={16} className="text-emerald-400" />
-                            <span className="text-xs text-emerald-300">Link ready</span>
-                        </div>
+
+                    {quote.status === 'approved' ? (
+                        <button
+                            onClick={handleSyncToQuickBooks}
+                            disabled={syncingQB}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-[#2CA01C] text-white font-medium rounded-lg hover:bg-[#238116] transition-all shadow-md active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                            title="Sync valid quote to QuickBooks"
+                        >
+                            {syncingQB ? <RefreshCw className="animate-spin" size={18} /> : <CheckCircle size={18} />}
+                            Sync to QuickBooks
+                        </button>
+                    ) : (
+                        <>
+                            <button
+                                onClick={copyForERP}
+                                className="btn-secondary flex items-center gap-2"
+                                title="Copy to clipboard for ERP paste"
+                            >
+                                <Copy size={18} /> Copy for ERP
+                            </button>
+                            <button
+                                onClick={generateQuoteLink}
+                                disabled={generatingLink}
+                                className="btn-secondary flex items-center gap-2 bg-blue-600 hover:bg-blue-500"
+                                title="Generate shareable link for customer approval"
+                            >
+                                <LinkIcon size={18} /> {shareLink ? 'Link Generated' : 'Generate Quote Link'}
+                            </button>
+                            {shareLink && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg">
+                                    <CheckCircle2 size={16} className="text-emerald-400" />
+                                    <span className="text-xs text-emerald-300">Link ready</span>
+                                </div>
+                            )}
+                            <button
+                                onClick={() => handleSave(false)}
+                                disabled={saving}
+                                className="btn-secondary flex items-center gap-2"
+                            >
+                                <Save size={18} /> Save Draft
+                            </button>
+                            <button
+                                onClick={() => handleSave(true)}
+                                disabled={saving}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                <CheckCircle size={18} /> Review & Approve
+                            </button>
+                        </>
                     )}
-                    <button 
-                        onClick={() => handleSave(false)}
-                        disabled={saving}
-                        className="btn-secondary flex items-center gap-2"
-                    >
-                        <Save size={18} /> Save Draft
-                    </button>
-                    <button 
-                        onClick={() => handleSave(true)}
-                        disabled={saving}
-                        className="btn-primary flex items-center gap-2"
-                    >
-                        <CheckCircle size={18} /> Approve & Process
-                    </button>
                 </div>
             </div>
 
@@ -389,7 +426,7 @@ export const QuoteReview = () => {
                 <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm flex items-center gap-2">
                     <AlertTriangle size={16} />
                     <span>
-                        This draft was automatically generated from an email. 
+                        This draft was automatically generated from an email.
                         Please review all extracted line items carefully before approving.
                     </span>
                 </div>
@@ -410,11 +447,10 @@ export const QuoteReview = () => {
                                     const highMarginAlt = findHighMarginAlternatives(item, suggestions[index]);
                                     const specCheck = checkSpecCompliance(item, quote.metadata?.tender_requirements);
                                     const currentMargin = calculateMargin(item);
-                                    
+
                                     return (
-                                        <div key={index} className={`p-4 hover:bg-slate-800/30 transition-colors ${
-                                            highMarginAlt ? 'bg-amber-500/5 border-l-2 border-amber-500/50' : ''
-                                        }`}>
+                                        <div key={index} className={`p-4 hover:bg-slate-800/30 transition-colors ${highMarginAlt ? 'bg-amber-500/5 border-l-2 border-amber-500/50' : ''
+                                            }`}>
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2 mb-2">
@@ -447,7 +483,7 @@ export const QuoteReview = () => {
                                                             </div>
                                                         )}
                                                     </div>
-                                                    
+
                                                     {/* Semantic SKU Matcher Display */}
                                                     {item.metadata?.original_extraction && (
                                                         <div className="mt-2 p-2 bg-slate-900/50 rounded text-xs">
@@ -465,14 +501,13 @@ export const QuoteReview = () => {
                                                             )}
                                                         </div>
                                                     )}
-                                                    
+
                                                     {/* Margin Boost Badge - Phase 2 Enhancement */}
                                                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                         <span className="text-xs text-slate-500">Margin:</span>
-                                                        <span className={`text-xs font-medium ${
-                                                            currentMargin > 20 ? 'text-emerald-400' : 
-                                                            currentMargin > 10 ? 'text-amber-400' : 'text-red-400'
-                                                        }`}>
+                                                        <span className={`text-xs font-medium ${currentMargin > 20 ? 'text-emerald-400' :
+                                                                currentMargin > 10 ? 'text-amber-400' : 'text-red-400'
+                                                            }`}>
                                                             {currentMargin.toFixed(1)}%
                                                         </span>
                                                         {highMarginAlt && (
@@ -495,7 +530,7 @@ export const QuoteReview = () => {
                                                             </div>
                                                         )}
                                                     </div>
-                                                    
+
                                                     {/* High Margin Alternative Alert */}
                                                     {highMarginAlt && (
                                                         <div className="mt-3 p-3 bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 rounded-lg">
@@ -525,7 +560,7 @@ export const QuoteReview = () => {
                             </div>
                         </div>
                     </div>
-                    
+
                     {/* Right: AI Recommendations */}
                     <div className="glass-panel rounded-2xl overflow-hidden">
                         <div className="p-6 border-b border-slate-700/50">
@@ -539,22 +574,22 @@ export const QuoteReview = () => {
                             {lineItems.map((item, index) => {
                                 const matches = suggestions[index] || [];
                                 const highMarginAlt = findHighMarginAlternatives(item, matches);
-                                
+
                                 if (!highMarginAlt && matches.length === 0) {
                                     return null;
                                 }
-                                
+
                                 const currentMargin = calculateMargin(item);
-                                const altMargin = highMarginAlt ? 
+                                const altMargin = highMarginAlt ?
                                     ((highMarginAlt.catalog_item.expected_price - (highMarginAlt.catalog_item.cost_price || highMarginAlt.catalog_item.expected_price * 0.7)) / highMarginAlt.catalog_item.expected_price * 100) : 0;
                                 const marginGain = altMargin - currentMargin;
-                                
+
                                 return (
                                     <div key={index} className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
                                         <div className="text-sm font-medium text-white mb-2">
                                             {item.description || `Item ${index + 1}`}
                                         </div>
-                                        
+
                                         {highMarginAlt ? (
                                             <div className="space-y-3">
                                                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
@@ -590,7 +625,7 @@ export const QuoteReview = () => {
                                                         Apply This Alternative
                                                     </button>
                                                 </div>
-                                                
+
                                                 {matches.length > 1 && (
                                                     <details className="text-xs">
                                                         <summary className="text-slate-400 cursor-pointer hover:text-slate-300">
@@ -625,7 +660,7 @@ export const QuoteReview = () => {
                                     </div>
                                 );
                             })}
-                            
+
                             {lineItems.every((item, index) => !suggestions[index] || suggestions[index].length === 0) && (
                                 <div className="text-center py-8 text-slate-500 text-sm">
                                     No recommendations available yet. Suggestions will appear after analysis.
@@ -642,7 +677,7 @@ export const QuoteReview = () => {
                             <p className="text-slate-400 text-sm">Review and edit extracted items</p>
                         </div>
                     </div>
-                    
+
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead>
@@ -659,18 +694,17 @@ export const QuoteReview = () => {
                                 {lineItems.map((item, index) => {
                                     const specCheck = checkSpecCompliance(item, quote.metadata?.tender_requirements);
                                     const currentMargin = calculateMargin(item);
-                                    
+
                                     return (
                                         <React.Fragment key={index}>
-                                            <tr className={`group hover:bg-slate-800/30 transition-colors ${
-                                                item.metadata?.match_score ? 'bg-green-500/5' : 
-                                                (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
-                                            }`}>
+                                            <tr className={`group hover:bg-slate-800/30 transition-colors ${item.metadata?.match_score ? 'bg-green-500/5' :
+                                                    (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
+                                                }`}>
                                                 <td className="px-6 py-4">
                                                     <div className="flex flex-col gap-1">
                                                         <div className="flex items-center gap-2">
-                                                            <input 
-                                                                type="text" 
+                                                            <input
+                                                                type="text"
                                                                 value={item.description || ''}
                                                                 onChange={(e) => updateItem(index, 'description', e.target.value)}
                                                                 className="bg-transparent border-none w-full text-slate-200 focus:ring-0 p-0 placeholder-slate-600"
@@ -717,8 +751,8 @@ export const QuoteReview = () => {
                                                             </div>
                                                         )}
                                                         {suggestions[index] && suggestions[index].length > 0 && (
-                                                            <button 
-                                                                onClick={() => setShowSuggestions({...showSuggestions, [index]: !showSuggestions[index]})}
+                                                            <button
+                                                                onClick={() => setShowSuggestions({ ...showSuggestions, [index]: !showSuggestions[index] })}
                                                                 className="text-xs text-blue-400 flex items-center gap-1 hover:text-blue-300 w-fit"
                                                             >
                                                                 <Lightbulb size={12} />
@@ -728,8 +762,8 @@ export const QuoteReview = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <input 
-                                                        type="text" 
+                                                    <input
+                                                        type="text"
                                                         value={item.sku || ''}
                                                         onChange={(e) => updateItem(index, 'sku', e.target.value)}
                                                         className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0 placeholder-slate-600"
@@ -737,8 +771,8 @@ export const QuoteReview = () => {
                                                     />
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <input 
-                                                        type="number" 
+                                                    <input
+                                                        type="number"
                                                         value={item.quantity}
                                                         onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
                                                         className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
@@ -748,8 +782,8 @@ export const QuoteReview = () => {
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center">
                                                         <span className="text-slate-500 mr-1">$</span>
-                                                        <input 
-                                                            type="number" 
+                                                        <input
+                                                            type="number"
                                                             value={item.unit_price}
                                                             onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value))}
                                                             className="bg-transparent border-none w-full text-slate-300 focus:ring-0 p-0"
@@ -763,13 +797,12 @@ export const QuoteReview = () => {
                                                 <td className="px-6 py-4 text-center">
                                                     {item.metadata?.original_extraction?.confidence_score && (
                                                         <div className="flex justify-center" title="Extraction Confidence">
-                                                            <span className={`text-xs px-2 py-1 rounded-full ${
-                                                                item.metadata.original_extraction.confidence_score > 0.8 
-                                                                    ? 'bg-emerald-500/10 text-emerald-400' 
+                                                            <span className={`text-xs px-2 py-1 rounded-full ${item.metadata.original_extraction.confidence_score > 0.8
+                                                                    ? 'bg-emerald-500/10 text-emerald-400'
                                                                     : item.metadata.original_extraction.confidence_score < 0.7
                                                                         ? 'bg-red-500/10 text-red-400 border border-red-500/20'
                                                                         : 'bg-amber-500/10 text-amber-400'
-                                                            }`}>
+                                                                }`}>
                                                                 {Math.round(item.metadata.original_extraction.confidence_score * 100)}%
                                                             </span>
                                                         </div>
@@ -801,12 +834,11 @@ export const QuoteReview = () => {
                                                                         <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">
                                                                             {match.match_type?.replace('_', ' ')}
                                                                         </span>
-                                                                        <span className={`text-xs px-2 py-0.5 rounded ${
-                                                                            match.score > 0.8 ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'
-                                                                        }`}>
+                                                                        <span className={`text-xs px-2 py-0.5 rounded ${match.score > 0.8 ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'
+                                                                            }`}>
                                                                             {Math.round(match.score * 100)}% Match
                                                                         </span>
-                                                                        <button 
+                                                                        <button
                                                                             onClick={() => applySuggestion(index, match)}
                                                                             className="btn-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs flex items-center gap-1"
                                                                         >

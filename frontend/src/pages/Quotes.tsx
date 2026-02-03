@@ -6,6 +6,8 @@ import { quotesApi } from '../services/api';
 const statusBadge = (status: string) => {
   const styles: any = {
     draft: 'bg-gray-100 text-gray-700',
+    pending_approval: 'bg-orange-50 text-orange-700',
+    approved: 'bg-indigo-50 text-indigo-700',
     sent: 'bg-blue-50 text-blue-700',
     accepted: 'bg-emerald-50 text-emerald-700',
     rejected: 'bg-red-50 text-red-700',
@@ -21,6 +23,7 @@ const statusBadge = (status: string) => {
 export const Quotes = () => {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -28,11 +31,14 @@ export const Quotes = () => {
   }, []);
 
   const loadQuotes = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const res = await quotesApi.list(50);
       setQuotes(res.data || []);
-    } catch (error) {
-      console.error('Failed to load quotes:', error);
+    } catch (err) {
+      console.error('Failed to load quotes:', err);
+      setError('Unable to load quotes. Check that the backend is running and try again.');
     } finally {
       setLoading(false);
     }
@@ -87,6 +93,16 @@ export const Quotes = () => {
         {loading ? (
           <div className="bg-white border border-gray-200 rounded-lg p-12 text-center text-gray-500">
             Loading quotes...
+          </div>
+        ) : error ? (
+          <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
+            <p className="text-red-600 mb-4">{error}</p>
+            <button
+              onClick={loadQuotes}
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-all shadow-md active:scale-[0.98]"
+            >
+              Retry
+            </button>
           </div>
         ) : filteredQuotes.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">

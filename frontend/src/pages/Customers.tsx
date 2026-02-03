@@ -5,11 +5,21 @@ import {
     Building, ChevronRight, Zap, ExternalLink
 } from 'lucide-react';
 import { customersApi } from '../services/api';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "../components/ui/table";
+import { Button } from "../components/ui/button";
 
 export const Customers = () => {
     const navigate = useNavigate();
     const [customers, setCustomers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState('');
 
     useEffect(() => {
@@ -17,11 +27,14 @@ export const Customers = () => {
     }, []);
 
     const loadCustomers = async () => {
+        setLoading(true);
+        setError(null);
         try {
             const res = await customersApi.list();
             setCustomers(res.data || []);
-        } catch (error) {
-            console.error('Failed to load customers:', error);
+        } catch (err) {
+            console.error('Failed to load customers:', err);
+            setError('Unable to load customers. Check that the backend is running and try again.');
         } finally {
             setLoading(false);
         }
@@ -34,87 +47,88 @@ export const Customers = () => {
     );
 
     return (
-        <div className="min-h-screen bg-gray-50/50">
+        <div className="space-y-8">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200">
-                <div className="max-w-7xl mx-auto px-8 py-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h1 className="text-2xl font-semibold text-gray-900">Customers</h1>
-                            <p className="text-gray-600 mt-1">Manage relationships and view performance intelligence</p>
-                        </div>
-                        <button
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 !text-white font-medium rounded-lg hover:bg-orange-700 transition-colors shadow-sm"
-                            disabled
-                        >
-                            <Plus size={18} />
-                            Add Customer
-                        </button>
-                    </div>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Customers</h1>
+                    <p className="text-gray-500 mt-2 text-lg">Manage relationships and intelligent data.</p>
                 </div>
+                <Button
+                    onClick={() => navigate('/quotes/new')}
+                    className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg hover:shadow-orange-500/20 transition-all rounded-xl px-6"
+                >
+                    <Plus className="mr-2 h-4 w-4" /> Add Customer
+                </Button>
             </div>
 
-            <div className="max-w-7xl mx-auto px-8 py-8">
-                {/* Search and Filters */}
-                <div className="flex items-center gap-4 mb-6">
-                    <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            {/* Content Card */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Toolbar */}
+                <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center">
+                    <div className="relative w-full md:w-96">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
                         <input
                             type="text"
-                            placeholder="Search by name, company, or email..."
+                            placeholder="Search customers..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                            className="w-full pl-10 pr-4 py-2.5 bg-gray-50/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                         />
                     </div>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors shadow-sm">
-                        <Filter size={18} />
-                        Filter
-                    </button>
+                    <div className="flex gap-2">
+                        <Button variant="outline" className="text-gray-600 border-gray-200 rounded-xl">
+                            <Filter className="mr-2 h-4 w-4" /> Filter
+                        </Button>
+                    </div>
                 </div>
 
-                {/* Table Content */}
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                {/* Table */}
+                <div className="relative">
                     {loading ? (
+                        <div className="p-12 flex justify-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-orange-500 border-t-transparent" />
+                        </div>
+                    ) : error ? (
                         <div className="p-12 text-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-orange-500 border-t-transparent mx-auto mb-4"></div>
-                            <p className="text-gray-500">Loading your customer base...</p>
+                            <p className="text-red-600 mb-4">{error}</p>
+                            <Button onClick={loadCustomers} className="bg-orange-600 hover:bg-orange-700 text-white">
+                                Retry
+                            </Button>
                         </div>
                     ) : filteredCustomers.length === 0 ? (
-                        <div className="p-12 text-center">
+                        <div className="p-16 text-center">
                             <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Users className="text-gray-300" size={32} />
+                                <Users className="text-gray-300" size={24} />
                             </div>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
-                            <p className="text-gray-600">
-                                {search ? `No results for "${search}"` : "You haven't added any customers yet."}
-                            </p>
+                            <h3 className="text-lg font-medium text-gray-900">No customers found</h3>
+                            <p className="text-gray-500 mt-1">Try adjusting your search terms.</p>
                         </div>
                     ) : (
-                        <table className="w-full border-collapse">
-                            <thead>
-                                <tr className="bg-gray-50 border-b border-gray-200">
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Company</th>
-                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
+                        <Table>
+                            <TableHeader className="bg-gray-50/50">
+                                <TableRow>
+                                    <TableHead className="pl-6 w-[300px] py-4 text-xs uppercase tracking-wider font-semibold text-gray-500">Customer Details</TableHead>
+                                    <TableHead className="py-4 text-xs uppercase tracking-wider font-semibold text-gray-500">Contact Info</TableHead>
+                                    <TableHead className="py-4 text-xs uppercase tracking-wider font-semibold text-gray-500">Company</TableHead>
+                                    <TableHead className="text-right pr-6 py-4 text-xs uppercase tracking-wider font-semibold text-gray-500">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
                                 {filteredCustomers.map((customer) => (
-                                    <tr key={customer.id} className="hover:bg-orange-50/30 transition-colors group">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600 font-bold">
+                                    <TableRow key={customer.id} className="group hover:bg-gray-50/50 transition-colors cursor-pointer border-b border-gray-100 last:border-0">
+                                        <TableCell className="pl-6 py-4">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-orange-700 font-bold text-sm">
                                                     {customer.name?.charAt(0) || 'C'}
                                                 </div>
                                                 <div>
-                                                    <div className="font-medium text-gray-900">{customer.name}</div>
-                                                    <div className="text-xs text-gray-400">ID: {customer.id?.slice(0, 8)}</div>
+                                                    <div className="font-semibold text-gray-900">{customer.name}</div>
+                                                    <div className="text-xs text-gray-500 font-mono mt-0.5">ID: {customer.id?.slice(0, 8)}</div>
                                                 </div>
                                             </div>
-                                        </td>
-                                        <td className="px-6 py-4">
+                                        </TableCell>
+                                        <TableCell>
                                             <div className="space-y-1">
                                                 {customer.email && (
                                                     <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -129,37 +143,45 @@ export const Customers = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">
-                                            <div className="flex items-center gap-2">
-                                                <Building size={16} className="text-gray-400" />
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                <Building size={14} className="text-gray-400" />
                                                 {customer.company || 'Private Individual'}
                                             </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                    onClick={() => navigate(`/intelligence/customers/${customer.id}`)}
-                                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                                                    title="View Intelligence"
+                                        </TableCell>
+                                        <TableCell className="text-right pr-6">
+                                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/intelligence/customers/${customer.id}`);
+                                                    }}
+                                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg h-8 px-3"
                                                 >
-                                                    <Zap size={14} />
+                                                    <Zap size={14} className="mr-1.5" />
                                                     Intelligence
-                                                </button>
-                                                <button
-                                                    onClick={() => navigate(`/quotes/new?customer=${customer.id}`)}
-                                                    className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-md transition-all"
-                                                    title="New Quote"
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/quotes/new?customer=${customer.id}`);
+                                                    }}
+                                                    className="text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg w-8 h-8"
                                                 >
                                                     <Plus size={18} />
-                                                </button>
-                                                <ChevronRight className="text-gray-300 group-hover:text-gray-500 transition-colors" size={20} />
+                                                </Button>
+                                                <ChevronRight className="text-gray-300" size={18} />
                                             </div>
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 ))}
-                            </tbody>
-                        </table>
+                            </TableBody>
+                        </Table>
                     )}
                 </div>
             </div>

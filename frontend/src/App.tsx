@@ -16,6 +16,8 @@ import { IntelligenceDashboard } from './pages/IntelligenceDashboard';
 import { CameraCapture } from './pages/CameraCapture';
 import { BusinessImpact } from './pages/BusinessImpact';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
+import { AccountBilling } from './pages/AccountBilling';
+import { Security } from './pages/Security';
 
 function App() {
   return (
@@ -40,6 +42,8 @@ function App() {
         <Route path="/impact" element={<Layout><IntelligenceDashboard /></Layout>} />
         <Route path="/camera" element={<Layout><CameraCapture /></Layout>} />
         <Route path="/knowledge" element={<Layout><KnowledgeBasePage /></Layout>} />
+        <Route path="/account/billing" element={<Layout><AccountBilling /></Layout>} />
+        <Route path="/security" element={<Layout><Security /></Layout>} />
       </Routes>
     </Router>
   );

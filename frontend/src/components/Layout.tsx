@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Users, Package, LogOut, Inbox, Target, Sparkles, CreditCard, TrendingUp, BarChart3, Brain } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, Package, LogOut, Inbox, Target, Sparkles, CreditCard, TrendingUp, BarChart3, Brain, Shield } from 'lucide-react';
 import clsx from 'clsx';
 import { NotificationCenter } from './NotificationCenter';
 
@@ -58,6 +58,11 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
           <SidebarItem icon={BarChart3} label="Analytics" to="/intelligence" />
           <SidebarItem icon={Target} label="Cross Reference" to="/mappings" />
           <SidebarItem icon={Brain} label="Knowledge" to="/knowledge" />
+
+          <div className="pt-4 pb-2">
+            <div className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">System</div>
+          </div>
+          <SidebarItem icon={Shield} label="Security" to="/security" />
         </nav>
 
         {/* User */}
