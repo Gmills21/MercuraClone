@@ -20,22 +20,25 @@
         return; // Not an email provider we support
     }
 
-    // Create Quick Quote button
-    function createQuickQuoteButton() {
+    // Create Extract RFQ button
+    function createExtractRFQButton() {
         const button = document.createElement('button');
-        button.id = 'mercura-quick-quote-btn';
+        button.id = 'mercura-extract-rfq-btn';
         button.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                <path d="M13 8H7M17 12H7"/>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14,2 14,8 20,8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10,9 9,9 8,9"/>
             </svg>
-            <span>Quick Quote</span>
+            <span>Extract RFQ</span>
         `;
-        button.className = 'mercura-quick-quote-button';
-        button.title = 'Extract quote from this email (3-minute setup vs. Mercura\'s 3 days)';
-        
-        button.addEventListener('click', handleQuickQuote);
-        
+        button.className = 'mercura-extract-rfq-button';
+        button.title = 'Extract RFQ from this email and send to Gemini service';
+
+        button.addEventListener('click', handleExtractRFQ);
+
         return button;
     }
 
@@ -99,19 +102,17 @@
                 return;
             }
 
-            // Send to backend extraction endpoint
-            // Create a text file from email body
-            const blob = new Blob([emailBody], { type: 'text/plain' });
-            const file = new File([blob], 'email-content.txt', { type: 'text/plain' });
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const response = await fetch(`${API_BASE}/webhooks/upload`, {
+            // Send to Gemini service for extraction
+            const response = await fetch(`${API_BASE}/gemini/extract-rfq`, {
                 method: 'POST',
                 headers: {
+                    'Content-Type': 'application/json',
                     'X-User-ID': TEST_USER_ID,
                 },
-                body: formData
+                body: JSON.stringify({
+                    email_body: emailBody,
+                    metadata: metadata
+                })
             });
 
             if (!response.ok) {
@@ -120,21 +121,18 @@
 
             const result = await response.json();
 
-            // Show success message and open quote
-            if (result.quote_id) {
-                const quoteUrl = `${API_BASE.replace('/api', '')}/quotes/${result.quote_id}`;
-                const openQuote = confirm(
-                    `Quote extracted successfully!\n\n` +
-                    `Items: ${result.items_extracted}\n` +
-                    `Margin Added: $${result.total_margin_added?.toFixed(2) || '0.00'}\n\n` +
-                    `Open quote in new tab?`
-                );
-                
-                if (openQuote) {
-                    window.open(quoteUrl, '_blank');
-                }
+            // Show success message and open popup with summary
+            if (result.extracted_data) {
+                // Store extracted data for popup
+                chrome.storage.local.set({
+                    'extracted_rfq': result.extracted_data,
+                    'extraction_timestamp': Date.now()
+                });
+
+                // Open popup with summary
+                chrome.action.openPopup();
             } else {
-                alert('Quote extraction initiated. Check your dashboard for the new quote.');
+                alert('RFQ extraction failed. Please try again.');
             }
 
         } catch (error) {
@@ -178,7 +176,7 @@
         }
 
         if (targetContainer) {
-            const button = createQuickQuoteButton();
+            const button = createExtractRFQButton();
             
             // Insert button
             if (isGmail) {
@@ -196,7 +194,7 @@
             ? document.querySelector('[role="main"] [data-message-id]') !== null
             : document.querySelector('[role="main"] ._rp_1') !== null;
 
-        if (isEmailView && !document.getElementById('mercura-quick-quote-btn')) {
+        if (isEmailView && !document.getElementById('mercura-extract-rfq-btn')) {
             // Small delay to ensure DOM is ready
             setTimeout(injectButton, 500);
         }

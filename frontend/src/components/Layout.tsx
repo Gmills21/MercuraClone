@@ -1,84 +1,94 @@
-// Test imports for shadcn UI components
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Tabs } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Toaster } from "@/components/ui/sonner";
-import { Table } from "@/components/ui/table";
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Users, ShoppingBag, Settings, LogOut, Inbox, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, Package, LogOut, Inbox, Target, Sparkles, CreditCard, TrendingUp, BarChart3, Brain } from 'lucide-react';
 import clsx from 'clsx';
+import { NotificationCenter } from './NotificationCenter';
 
 const SidebarItem = ({ icon: Icon, label, to }: { icon: any, label: string, to: string }) => {
-    const location = useLocation();
-    const isActive = location.pathname === to || (to !== '/' && location.pathname.startsWith(to));
+  const location = useLocation();
+  const isActive = location.pathname === to || (to !== '/' && location.pathname.startsWith(to));
 
-    return (
-        <Link
-            to={to}
-            className={clsx(
-                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                isActive
-                    ? "bg-primary-500/10 text-primary-400 font-medium"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-            )}
-        >
-            <Icon size={20} className={clsx("transition-transform group-hover:scale-110", isActive ? "text-primary-400" : "text-slate-500 group-hover:text-slate-300")} />
-            <span>{label}</span>
-            {isActive && (
-                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" />
-            )}
-        </Link>
-    );
+  return (
+    <Link
+      to={to}
+      className={clsx(
+        "flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium",
+        isActive
+          ? "bg-orange-50 text-orange-700 border border-orange-200"
+          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+      )}
+    >
+      <Icon size={18} className={isActive ? "text-orange-600" : "text-gray-400"} />
+      <span>{label}</span>
+    </Link>
+  );
 };
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {
-    return (
-        <div className="flex min-h-screen bg-slate-950 text-slate-100 overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-slate-950">
-            {/* Sidebar */}
-            <aside className="w-64 glass-panel border-r border-slate-800/50 flex flex-col h-screen fixed left-0 top-0 z-10 backdrop-blur-xl">
-                <div className="p-6">
-                    <div className="flex items-center gap-2 mb-8">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
-                            <span className="font-bold text-white text-lg">M</span>
-                        </div>
-                        <span className="font-bold text-xl tracking-tight">Mercura</span>
-                    </div>
-
-                    <nav className="space-y-1">
-                        <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" />
-                        <SidebarItem icon={Inbox} label="Inbox" to="/emails" />
-                        <SidebarItem icon={FileText} label="Quotes" to="/quotes" />
-                        <SidebarItem icon={Users} label="Customers" to="/customers" />
-                        <SidebarItem icon={ShoppingBag} label="Products" to="/products" />
-                        <SidebarItem icon={ArrowLeftRight} label="Mappings" to="/mappings" />
-                    </nav>
-                </div>
-
-                <div className="mt-auto p-6 border-t border-slate-800/50">
-                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer transition-colors group">
-                        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center ring-2 ring-transparent group-hover:ring-primary-500/30 transition-all">
-                            <span className="font-medium text-sm">JD</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-200 truncate">John Doe</p>
-                            <p className="text-xs text-slate-500 truncate">Sales Rep</p>
-                        </div>
-                        <LogOut size={16} className="text-slate-500 group-hover:text-slate-300" />
-                    </div>
-                </div>
-            </aside>
-
-            {/* Main Content */}
-            <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen relative">
-                <div className="absolute top-0 left-0 w-full h-96 bg-primary-500/5 blur-[120px] pointer-events-none" />
-                <div className="relative max-w-7xl mx-auto animate-fade-in">
-                    {children}
-                </div>
-            </main>
-            <Toaster />
+  return (
+    <div className="flex min-h-screen bg-white">
+      {/* Sidebar */}
+      <aside className="w-64 border-r border-gray-200 flex flex-col h-screen fixed left-0 top-0 z-10 bg-white">
+        {/* Logo */}
+        <div className="px-6 py-5 border-b border-gray-200">
+          <Link to="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-orange-600 rounded flex items-center justify-center">
+              <span className="font-bold text-white text-sm">OM</span>
+            </div>
+            <span className="font-semibold text-lg text-gray-900">OpenMercura</span>
+          </Link>
         </div>
-    );
+
+        {/* Navigation */}
+        <nav className="flex-1 px-4 py-4 space-y-1">
+          <SidebarItem icon={LayoutDashboard} label="Dashboard" to="/" />
+          <SidebarItem icon={FileText} label="Quotes & RFQs" to="/quotes" />
+          <SidebarItem icon={Inbox} label="Inbox" to="/emails" />
+
+          <div className="pt-4 pb-2">
+            <div className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Inventory</div>
+          </div>
+          <SidebarItem icon={Users} label="Customers" to="/customers" />
+          <SidebarItem icon={Package} label="Products" to="/products" />
+
+          <div className="pt-4 pb-2">
+            <div className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Tools</div>
+          </div>
+          <SidebarItem icon={CreditCard} label="Integrations" to="/quickbooks" />
+          <SidebarItem icon={BarChart3} label="Analytics" to="/intelligence" />
+          <SidebarItem icon={Target} label="Cross Reference" to="/mappings" />
+          <SidebarItem icon={Brain} label="Knowledge" to="/knowledge" />
+        </nav>
+
+        {/* User */}
+        <div className="p-4 border-t border-gray-200">
+          <div className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+              <span className="font-medium text-sm text-gray-600">JD</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">John Doe</p>
+              <p className="text-xs text-gray-500 truncate">Admin</p>
+            </div>
+            <LogOut size={16} className="text-gray-400" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 ml-64 min-h-screen">
+        {/* Top Header with Notifications */}
+        <div className="fixed top-0 right-0 left-64 z-20 bg-white/80 backdrop-blur-sm border-b border-gray-200/50">
+          <div className="flex items-center justify-end px-6 py-3">
+            <NotificationCenter />
+          </div>
+        </div>
+        <div className="pt-14">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
 };
+
+export default Layout;

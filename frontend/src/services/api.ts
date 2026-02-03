@@ -23,6 +23,7 @@ export const quotesApi = {
 };
 
 export const productsApi = {
+    list: (limit = 100) => api.get(`/products?limit=${limit}`),
     search: (query: string) => api.get(`/products/search?query=${query}`),
     upload: (file: File) => {
         const formData = new FormData();
@@ -81,4 +82,33 @@ export const uploadApi = {
 
 export const statsApi = {
     get: (days: number = 30) => api.get(`/data/stats?days=${days}`),
+};
+
+export const extractionsApi = {
+    parse: (data: { text: string; source_type?: string }) => api.post('/extractions/parse', data),
+    list: (status?: string) => api.get(`/extractions/${status ? `?status=${status}` : ''}`),
+};
+
+// Knowledge Base API (optional feature)
+export const knowledgeBaseApi = {
+    getStatus: () => api.get('/knowledge/status'),
+    query: (question: string, docTypes?: string, useAi: boolean = true) => {
+        const formData = new FormData();
+        formData.append('question', question);
+        formData.append('use_ai', String(useAi));
+        if (docTypes) formData.append('doc_types', docTypes);
+        return api.post('/knowledge/query', formData);
+    },
+    ingest: (file: File, docType: string, supplier?: string) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('doc_type', docType);
+        if (supplier) formData.append('supplier', supplier);
+        return api.post('/knowledge/ingest', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+    },
+    listDocuments: () => api.get('/knowledge/documents'),
 };

@@ -1,0 +1,178 @@
+# Industrial Pipe Fittings Catalog
+## Product Specifications and Pricing
+
+### Overview
+Pipe fittings are components used to join pipe sections together with other fluid control products like valves and pumps to create pipelines. The common connotation for the term fittings is associated with the metals used in the building and construction industries.
+
+### Common Fitting Types
+
+**Elbows:**
+- 90-degree: Changes flow direction perpendicular to original direction
+- 45-degree: Gradual direction change
+- Long radius (LR): 1.5x nominal pipe size
+- Short radius (SR): 1.0x nominal pipe size
+
+**Tees:**
+- Equal tee: All three openings same size
+- Reducing tee: Branch outlet smaller than run
+- Straight tee: Run continues straight through
+
+**Couplings:**
+- Full coupling: Joins two pipes of same size
+- Reducing coupling: Joins different pipe sizes
+- Half coupling: Welded to one pipe only
+
+**Unions:**
+- Allow easy disassembly for maintenance
+- Three-part construction (nut, female, male ends)
+- Available threaded or socket weld
+
+**Caps and Plugs:**
+- Cap: Covers end of pipe (female fitting)
+- Plug: Closes end of pipe (male fitting)
+
+**Reducers:**
+- Concentric: Center lines aligned
+- Eccentric: Flat edge on one side (for drainage)
+
+### Material Specifications
+
+**Carbon Steel (A105, A234 WPB):**
+- Temperature range: -20°F to 1000°F
+- Pressure rating: Up to 3000 PSI
+- Common in oil & gas, power generation
+- Requires corrosion protection
+
+**Stainless Steel (304, 316, 316L):**
+- Temperature range: -425°F to 1500°F
+- Corrosion resistant
+- 316L for welded applications (low carbon)
+- Common in chemical, food, pharmaceutical
+
+**Brass (C36000):**
+- Temperature range: -20°F to 400°F
+- Excellent machinability
+- Lower pressure ratings
+- Common in plumbing, pneumatic
+
+**Ductile Iron:**
+- Temperature range: -20°F to 650°F
+- Cost-effective for water applications
+- Not for hydrocarbon service
+- Common in water, wastewater
+
+**Copper:**
+- Temperature range: -20°F to 400°F
+- Used for refrigerant and water lines
+- Soldered or brazed connections
+- Common in HVAC, plumbing
+
+### Dimensional Standards
+
+**NPT (National Pipe Thread):**
+- Tapered threads for pressure-tight seal
+- 60-degree thread angle
+- Requires thread sealant
+- Sizes: 1/8" to 24"
+
+**Socket Weld:**
+- Pipe inserted into socket before welding
+- Counterbore depth = pipe wall thickness + 1/16"
+- Sizes: 1/8" to 4"
+- Higher pressure ratings than threaded
+
+**Butt Weld:**
+- Pipe and fitting beveled for full penetration weld
+- Most common for industrial piping
+- Sizes: 1/2" to 48"+
+- Highest strength and pressure rating
+
+### Pressure Ratings (Schedule Numbers)
+
+**Schedule 40 (Standard):**
+- Wall thickness = 0.375" for 6" pipe
+- Pressure rating varies by size and material
+- Most common for general service
+
+**Schedule 80 (Extra Heavy):**
+- 1.5x wall thickness of Schedule 40
+- Higher pressure rating
+- Common in process piping
+
+**Schedule 160:**
+- Double wall thickness of Schedule 40
+- High pressure applications
+- Limited sizes available
+
+### Pricing Reference (Carbon Steel, 2024)
+
+**Threaded Fittings (Class 3000):**
+- 1/2" 90° elbow: $8-15
+- 1" tee: $15-25
+- 2" coupling: $20-35
+- 3" union: $80-150
+
+**Socket Weld Fittings (Class 6000):**
+- 1/2" 90° elbow: $12-20
+- 1" tee: $25-40
+- 2" coupling: $40-70
+
+**Butt Weld Fittings (Schedule 40):**
+- 2" 90° LR elbow: $25-45
+- 4" tee: $80-150
+- 6" reducer: $120-200
+- 8" cap: $150-250
+
+### Applications by Industry
+
+**Oil & Gas Production:**
+- High pressure ratings required
+- NACE MR0175 compliant materials
+- Butt weld preferred
+- Material traceability required
+
+**Chemical Processing:**
+- 316 stainless steel common
+- PTFE-lined fittings for corrosive service
+- Leak-free connections critical
+- Full penetration welding
+
+**Power Generation:**
+- High temperature materials (A182 F11, F22)
+- Schedule 80 or 160 common
+- Butt weld connections
+- PWHT often required
+
+**Food & Beverage:**
+- 304 or 316L stainless
+- Sanitary fittings (tri-clamp)
+- FDA compliant materials
+- Polished surfaces
+
+**Water/Wastewater:**
+- Ductile iron or carbon steel
+- Cement-lined or epoxy-coated
+- Flanged connections common
+- Lower pressure ratings
+
+### Lead Times
+- Standard carbon steel: 1-2 weeks
+- Stainless steel: 2-4 weeks
+- Special alloys: 6-12 weeks
+- Large diameter (>24"): 8-16 weeks
+
+### Quality Standards
+- ASTM A105 (Carbon steel forged)
+- ASTM A182 (Stainless forged)
+- ASTM A234 (Carbon steel wrought)
+- ASME B16.9 (Factory-made wrought)
+- ASME B16.11 (Forged fittings)
+- MSS SP-83 (Unions)
+
+### Key Manufacturers
+- Bonney Forge
+- Anvil International
+- Smith-Cooper
+- Merit Brass
+- Weldbend
+- Tube Turn

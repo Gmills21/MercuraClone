@@ -1,0 +1,147 @@
+# ACME Industrial Supply - Pricing Sheet
+## Valid: January 1 - March 31, 2025
+
+### Customer: Riverside Construction LLC
+### Terms: Net 30
+### Sales Rep: John Martinez (john.martinez@acmeindustrial.com)
+
+---
+
+## VALVES - BALL
+
+| SKU | Description | Size | Material | Rating | List Price | Your Price | Min Qty |
+|-----|-------------|------|----------|--------|------------|------------|---------|
+| BV-050-SS | Ball Valve, 2pc | 1/2" | 316 SS | 1000 WOG | $65.00 | $48.75 | 1 |
+| BV-100-SS | Ball Valve, 2pc | 1" | 316 SS | 1000 WOG | $95.00 | $71.25 | 1 |
+| BV-150-SS | Ball Valve, 2pc | 1-1/2" | 316 SS | 1000 WOG | $145.00 | $108.75 | 1 |
+| BV-200-SS | Ball Valve, 2pc | 2" | 316 SS | 1000 WOG | $225.00 | $168.75 | 1 |
+| BV-300-SS | Ball Valve, 2pc | 3" | 316 SS | 1000 WOG | $485.00 | $363.75 | 1 |
+| BV-050-BR | Ball Valve, 2pc | 1/2" | Brass | 600 WOG | $28.00 | $21.00 | 1 |
+| BV-100-BR | Ball Valve, 2pc | 1" | Brass | 600 WOG | $42.00 | $31.50 | 1 |
+| BV-200-BR | Ball Valve, 2pc | 2" | Brass | 600 WOG | $95.00 | $71.25 | 1 |
+| BV-050-CI | Ball Valve, 2pc | 1/2" | Ductile Iron | 250 WOG | $45.00 | $33.75 | 1 |
+| BV-100-CI | Ball Valve, 2pc | 1" | Ductile Iron | 250 WOG | $68.00 | $51.00 | 1 |
+
+**Volume Discounts (Ball Valves):**
+- 10-24 units: Additional 5% off
+- 25-49 units: Additional 10% off
+- 50+ units: Additional 15% off
+
+---
+
+## VALVES - GATE
+
+| SKU | Description | Size | Material | Rating | List Price | Your Price | Min Qty |
+|-----|-------------|------|----------|--------|------------|------------|---------|
+| GV-200-CI | Gate Valve, OS&Y | 2" | Cast Iron | 125# | $185.00 | $138.75 | 1 |
+| GV-300-CI | Gate Valve, OS&Y | 3" | Cast Iron | 125# | $295.00 | $221.25 | 1 |
+| GV-400-CI | Gate Valve, OS&Y | 4" | Cast Iron | 125# | $425.00 | $318.75 | 1 |
+| GV-600-CI | Gate Valve, OS&Y | 6" | Cast Iron | 125# | $785.00 | $588.75 | 1 |
+| GV-200-SS | Gate Valve, OS&Y | 2" | 316 SS | 150# | $425.00 | $318.75 | 1 |
+| GV-300-SS | Gate Valve, OS&Y | 3" | 316 SS | 150# | $685.00 | $513.75 | 1 |
+| GV-400-SS | Gate Valve, OS&Y | 4" | 316 SS | 150# | $985.00 | $738.75 | 1 |
+
+---
+
+## FITTINGS - CARBON STEEL (A105)
+
+| SKU | Description | Size | Schedule | List Price | Your Price | Min Qty |
+|-----|-------------|------|----------|------------|------------|---------|
+| EL-90-050-SW | 90° Elbow | 1/2" | 3000# SW | $12.00 | $9.00 | 10 |
+| EL-90-100-SW | 90° Elbow | 1" | 3000# SW | $18.00 | $13.50 | 10 |
+| EL-90-200-SW | 90° Elbow | 2" | 3000# SW | $42.00 | $31.50 | 5 |
+| TEE-050-SW | Equal Tee | 1/2" | 3000# SW | $15.00 | $11.25 | 10 |
+| TEE-100-SW | Equal Tee | 1" | 3000# SW | $24.00 | $18.00 | 10 |
+| TEE-200-SW | Equal Tee | 2" | 3000# SW | $58.00 | $43.50 | 5 |
+| CAP-050-SW | Cap | 1/2" | 3000# SW | $8.00 | $6.00 | 10 |
+| CAP-100-SW | Cap | 1" | 3000# SW | $14.00 | $10.50 | 10 |
+| CPL-050-SW | Coupling | 1/2" | 3000# SW | $10.00 | $7.50 | 10 |
+| CPL-100-SW | Coupling | 1" | 3000# SW | $16.00 | $12.00 | 10 |
+
+**Volume Discounts (Fittings):**
+- 50-99 pieces: Additional 5% off
+- 100-249 pieces: Additional 10% off
+- 250+ pieces: Additional 15% off
+
+---
+
+## FITTINGS - STAINLESS STEEL (316)
+
+| SKU | Description | Size | Schedule | List Price | Your Price | Min Qty |
+|-----|-------------|------|----------|------------|------------|---------|
+| EL-90-050-SS | 90° Elbow | 1/2" | 3000# SW | $28.00 | $21.00 | 10 |
+| EL-90-100-SS | 90° Elbow | 1" | 3000# SW | $42.00 | $31.50 | 10 |
+| EL-90-200-SS | 90° Elbow | 2" | 3000# SW | $95.00 | $71.25 | 5 |
+| TEE-050-SS | Equal Tee | 1/2" | 3000# SW | $35.00 | $26.25 | 10 |
+| TEE-100-SS | Equal Tee | 1" | 3000# SW | $55.00 | $41.25 | 10 |
+| TEE-200-SS | Equal Tee | 2" | 3000# SW | $125.00 | $93.75 | 5 |
+
+---
+
+## FLANGES - CARBON STEEL
+
+| SKU | Description | Size | Class | Face | List Price | Your Price |
+|-----|-------------|------|-------|------|------------|------------|
+| FL-WN-200-150 | Weld Neck | 2" | 150# | RF | $45.00 | $33.75 |
+| FL-WN-300-150 | Weld Neck | 3" | 150# | RF | $68.00 | $51.00 |
+| FL-WN-400-150 | Weld Neck | 4" | 150# | RF | $95.00 | $71.25 |
+| FL-WN-600-150 | Weld Neck | 6" | 150# | RF | $165.00 | $123.75 |
+| FL-SL-200-150 | Slip On | 2" | 150# | RF | $28.00 | $21.00 |
+| FL-SL-300-150 | Slip On | 3" | 150# | RF | $42.00 | $31.50 |
+| FL-SL-400-150 | Slip On | 4" | 150# | RF | $58.00 | $43.50 |
+| FL-BL-200-150 | Blind | 2" | 150# | RF | $32.00 | $24.00 |
+| FL-BL-300-150 | Blind | 3" | 150# | RF | $48.00 | $36.00 |
+| FL-BL-400-150 | Blind | 4" | 150# | RF | $68.00 | $51.00 |
+
+---
+
+## SPECIAL NOTES
+
+**Stocking Program:**
+High-volume items marked with * are stocked at our Cleveland warehouse for same-day or next-day delivery.
+
+**Lead Times:**
+- Stocked items: 1-2 days
+- Non-stocked standard: 1-2 weeks
+- Special order: 3-4 weeks
+- Import items: 8-12 weeks
+
+**Shipping:**
+- FOB: Cleveland, OH
+- Prepaid freight on orders over $2,500
+- $150 flat rate on orders under $500
+- Will call available (no charge)
+
+**Returns:**
+- Standard items: 30 days with RMA
+- Special order: Non-returnable
+- Cut pipe/threaded: Non-returnable
+
+**Price Protection:**
+- This pricing valid through March 31, 2025
+- 30-day notice of any price increases
+- Exchange rate protection for imports
+
+**Payment Terms:**
+- Net 30 days from invoice date
+- 2% discount for payment within 10 days
+- Credit card accepted (no discount applies)
+
+---
+
+## CONTACT INFORMATION
+
+**ACME Industrial Supply**
+456 Commerce Parkway
+Cleveland, OH 44128
+
+**Phone:** (216) 555-0147
+**Fax:** (216) 555-0148
+**Email:** orders@acmeindustrial.com
+**Web:** www.acmeindustrial.com
+
+**After Hours Emergency:** (216) 555-0199
+
+---
+
+*Prices subject to change without notice. All sales subject to ACME Industrial Supply standard terms and conditions.*

@@ -401,7 +401,7 @@ export const QuoteReview = () => {
                     {/* Left: Extracted Data */}
                     <div className="glass-panel rounded-2xl overflow-hidden">
                         <div className="p-6 border-b border-slate-700/50">
-                            <h3 className="text-lg font-semibold text-white mb-1">Extracted Data</h3>
+                            <h3 className="text-lg font-semibold text-white mb-1">Extracted RFQ</h3>
                             <p className="text-slate-400 text-sm">Original items from source</p>
                         </div>
                         <div className="overflow-y-auto max-h-[600px]">
@@ -692,13 +692,19 @@ export const QuoteReview = () => {
                                                                 return null;
                                                             })()}
                                                             {currentMargin < 10 && (
-                                                                <TrendingDown size={14} className="text-red-400" title={`Low Margin: ${currentMargin.toFixed(1)}%`} />
+                                                                <span title={`Low Margin: ${currentMargin.toFixed(1)}%`}>
+                                                                    <TrendingDown size={14} className="text-red-400" />
+                                                                </span>
                                                             )}
                                                             {specCheck && (
                                                                 specCheck.compliant ? (
-                                                                    <Shield size={14} className="text-emerald-400" title={specCheck.reason} />
+                                                                    <span title={specCheck.reason}>
+                                                                        <Shield size={14} className="text-emerald-400" />
+                                                                    </span>
                                                                 ) : (
-                                                                    <AlertTriangle size={14} className="text-red-400" title={specCheck.reason} />
+                                                                    <span title={specCheck.reason}>
+                                                                        <AlertTriangle size={14} className="text-red-400" />
+                                                                    </span>
                                                                 )
                                                             )}
                                                         </div>

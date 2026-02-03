@@ -6,18 +6,18 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 export const Products = () => {
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
-    const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
-    
+    const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [searching, setSearching] = useState(false);
-    
+
     // Chat state
     const [chatOpen, setChatOpen] = useState(false);
     const [chatQuery, setChatQuery] = useState('');
-    const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'assistant', content: string, products?: any[]}>>([]);
+    const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string, products?: any[] }>>([]);
     const [chatting, setChatting] = useState(false);
-    
+
     // Competitor mapping state
     const [competitorSku, setCompetitorSku] = useState('');
     const [ourSku, setOurSku] = useState('');
@@ -32,7 +32,7 @@ export const Products = () => {
 
     const handleUpload = async () => {
         if (!file) return;
-        
+
         try {
             setUploading(true);
             setMessage(null);
@@ -42,9 +42,9 @@ export const Products = () => {
             // Reset file input value if possible, or just rely on state
         } catch (error: any) {
             console.error('Upload failed:', error);
-            setMessage({ 
-                type: 'error', 
-                text: error.response?.data?.detail || 'Failed to upload catalog.' 
+            setMessage({
+                type: 'error',
+                text: error.response?.data?.detail || 'Failed to upload catalog.'
             });
         } finally {
             setUploading(false);
@@ -106,7 +106,7 @@ export const Products = () => {
             const csvContent = `Competitor SKU,Our SKU\n${competitorSku},${ourSku}`;
             const blob = new Blob([csvContent], { type: 'text/csv' });
             const file = new File([blob], 'competitor_map.csv', { type: 'text/csv' });
-            
+
             await productsApi.uploadCompetitorMap(file);
             alert('Competitor mapping added successfully!');
             setCompetitorSku('');
@@ -122,10 +122,10 @@ export const Products = () => {
     return (
         <div className="space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-white">Products Catalog</h1>
+                <h1 className="text-2xl font-bold text-gray-900">Products Catalog</h1>
                 <Sheet open={chatOpen} onOpenChange={setChatOpen}>
                     <SheetTrigger asChild>
-                        <button className="btn-primary flex items-center gap-2">
+                        <button className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium">
                             <MessageCircle size={18} />
                             Chat with Catalog
                         </button>
@@ -148,11 +148,10 @@ export const Products = () => {
                                 ) : (
                                     chatHistory.map((msg, idx) => (
                                         <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[80%] rounded-lg p-3 ${
-                                                msg.role === 'user' 
-                                                    ? 'bg-blue-500/20 text-blue-100' 
-                                                    : 'bg-slate-800 text-slate-200'
-                                            }`}>
+                                            <div className={`max-w-[80%] rounded-lg p-3 ${msg.role === 'user'
+                                                ? 'bg-blue-500/20 text-blue-100'
+                                                : 'bg-slate-800 text-slate-200'
+                                                }`}>
                                                 <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
                                                 {msg.products && msg.products.length > 0 && (
                                                     <div className="mt-3 space-y-2">
@@ -196,37 +195,44 @@ export const Products = () => {
                     </SheetContent>
                 </Sheet>
             </div>
-            
+
             {/* Import Section */}
-            <div className="glass-panel rounded-2xl p-6">
-                <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <Upload size={20} /> Import Catalog
+            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Upload size={20} className="text-orange-500" /> Import Catalog
                 </h2>
-                <div className="flex items-center gap-4">
-                    <input 
-                        type="file" 
-                        accept=".csv,.xlsx,.xls"
-                        onChange={handleFileChange}
-                        className="block w-full text-sm text-slate-400
-                            file:mr-4 file:py-2 file:px-4
-                            file:rounded-full file:border-0
-                            file:text-sm file:font-semibold
-                            file:bg-slate-800 file:text-blue-400
-                            hover:file:bg-slate-700
-                            cursor-pointer"
-                    />
-                    <button 
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <div className="relative flex-1 w-full">
+                        <input
+                            type="file"
+                            id="catalog-upload"
+                            accept=".csv,.xlsx,.xls"
+                            onChange={handleFileChange}
+                            className="SR-only hidden"
+                        />
+                        <label
+                            htmlFor="catalog-upload"
+                            className="flex items-center justify-between w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                        >
+                            <span className="text-sm text-gray-600 truncate">
+                                {file ? file.name : "Choose catalog file..."}
+                            </span>
+                            <span className="text-xs font-semibold text-orange-600 px-2 py-1 bg-orange-50 rounded">
+                                Browse
+                            </span>
+                        </label>
+                    </div>
+                    <button
                         onClick={handleUpload}
                         disabled={!file || uploading}
-                        className="btn-primary whitespace-nowrap"
+                        className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white px-6 py-2 rounded-lg font-medium transition-colors"
                     >
                         {uploading ? 'Uploading...' : 'Upload File'}
                     </button>
                 </div>
                 {message && (
-                    <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${
-                        message.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                    }`}>
+                    <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${message.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                        }`}>
                         {message.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
                         {message.text}
                     </div>
@@ -237,19 +243,23 @@ export const Products = () => {
             </div>
 
             {/* Search Section */}
-            <div className="glass-panel rounded-2xl p-6">
-                <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <Search size={20} /> Search Catalog
+            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Search size={20} className="text-orange-500" /> Search Catalog
                 </h2>
                 <form onSubmit={handleSearch} className="flex gap-2 mb-6">
-                    <input 
-                        type="text" 
+                    <input
+                        type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search by SKU or Name..."
-                        className="input-field flex-1"
+                        className="flex-1 bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
-                    <button type="submit" className="btn-secondary" disabled={searching}>
+                    <button
+                        type="submit"
+                        className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-2 rounded-lg font-medium transition-colors"
+                        disabled={searching}
+                    >
                         {searching ? 'Searching...' : 'Search'}
                     </button>
                 </form>
@@ -258,8 +268,8 @@ export const Products = () => {
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead>
-                                <tr className="text-slate-400 border-b border-slate-700/50">
-                                    <th className="px-4 py-2">SKU</th>
+                                <tr className="bg-gray-50 text-gray-600 border-b border-gray-200">
+                                    <th className="px-4 py-3 font-semibold uppercase text-xs">SKU</th>
                                     <th className="px-4 py-2">Name</th>
                                     <th className="px-4 py-2">Price</th>
                                     <th className="px-4 py-2">Category</th>
@@ -269,7 +279,7 @@ export const Products = () => {
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
                                 {searchResults.map((item: any) => (
-                                    <tr key={item.id} className="hover:bg-slate-800/30 group">
+                                    <tr key={item.id} className="hover:bg-gray-50 group">
                                         <td className="px-4 py-3 text-slate-300 font-mono">{item.sku}</td>
                                         <td className="px-4 py-3 text-slate-300">{item.item_name}</td>
                                         <td className="px-4 py-3 text-slate-300">${item.expected_price?.toFixed(2)}</td>
@@ -302,9 +312,9 @@ export const Products = () => {
             </div>
 
             {/* Competitor Swap UI */}
-            <div id="competitor-mapping" className="glass-panel rounded-2xl p-6">
-                <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <ArrowRight size={20} /> Map Competitor Part Numbers
+            <div id="competitor-mapping" className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <ArrowRight size={20} className="text-orange-500" /> Map Competitor Part Numbers
                 </h2>
                 <p className="text-slate-400 text-sm mb-4">
                     Map competitor or customer part numbers to your internal SKUs for automatic matching in quotes.
@@ -338,16 +348,16 @@ export const Products = () => {
                 <button
                     onClick={handleMapCompetitor}
                     disabled={mappingCompetitor || !competitorSku.trim() || !ourSku.trim()}
-                    className="btn-primary flex items-center gap-2"
+                    className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2 transition-colors disabled:bg-gray-300"
                 >
                     {mappingCompetitor ? (
                         <>
-                            <RefreshCw size={16} className="animate-spin" />
+                            <RefreshCw size={18} className="animate-spin" />
                             Mapping...
                         </>
                     ) : (
                         <>
-                            <CheckCircle size={16} />
+                            <CheckCircle size={18} />
                             Add Mapping
                         </>
                     )}

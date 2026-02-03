@@ -76,41 +76,7 @@ async def export_excel(request: ExportRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/google-sheets")
-async def export_google_sheets(request: ExportRequest):
-    """
-    Export line items to Google Sheets.
-    
-    Requires:
-    - google_sheet_id: The ID of the Google Sheet to update
-    
-    Filters:
-    - email_ids: List of specific email IDs
-    - start_date/end_date: Date range filter
-    - include_metadata: Include additional metadata columns
-    """
-    try:
-        if not request.google_sheet_id:
-            raise HTTPException(
-                status_code=400,
-                detail="google_sheet_id is required for Google Sheets export"
-            )
-        
-        result = await export_service.export_to_google_sheets(
-            sheet_id=request.google_sheet_id,
-            email_ids=request.email_ids,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            include_metadata=request.include_metadata
-        )
-        
-        return result
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Google Sheets export error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Removed Google Sheets export - focusing on CSV/Excel only for ERP integration
 
 
 @router.get("/history")

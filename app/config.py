@@ -1,10 +1,11 @@
 """
-Configuration management for Mercura application.
+Configuration management for OpenMercura application.
 Loads and validates environment variables.
+Uses ONLY free tools: SQLite, OpenRouter, local ChromaDB.
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 import os
 import sys
 
@@ -13,36 +14,42 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     # Application
-    app_name: str = "Mercura"
+    app_name: str = "OpenMercura"
     app_env: str = "development"
     debug: bool = True
-    secret_key: str = ""  # Allow empty for startup, validate later
-    host: str = "0.0.0.0"
-    port: int = int(os.getenv("PORT", "8000"))  # Use PORT from Render, fallback to 8000
+    secret_key: str = "dev-secret-key-change-in-production"
+    host: str = "127.0.0.1"
+    port: int = int(os.getenv("PORT", "9000"))
     
-    # Supabase
-    supabase_url: str = ""
-    supabase_key: str = ""
-    supabase_service_key: str = ""
-    
-    # Gemini
+    # Gemini API
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model: str = "gemini-1.5-flash"
     
-    # Email Provider
-    email_provider: str = "sendgrid"  # sendgrid or mailgun
+    # OpenRouter (FREE TIER - replaces paid Gemini)
+    openrouter_api_key: str = ""
+    openrouter_model: str = "deepseek/deepseek-chat:free"
     
-    # SendGrid
+    # Direct DeepSeek or Fallback API (OpenAI Compatible)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-chat"
+    
+    # Email Provider (optional - webhooks still work without)
+    email_provider: str = "none"  # none, sendgrid, or mailgun
+    
+    # QuickBooks Integration (optional)
+    quickbooks_client_id: str = ""
+    quickbooks_client_secret: str = ""
+    quickbooks_sandbox: bool = True
+    
+    # SendGrid (optional)
     sendgrid_webhook_secret: Optional[str] = None
     sendgrid_inbound_domain: Optional[str] = None
     
-    # Mailgun
+    # Mailgun (optional)
     mailgun_api_key: Optional[str] = None
     mailgun_webhook_secret: Optional[str] = None
     mailgun_domain: Optional[str] = None
-    
-    # Google Sheets
-    google_sheets_credentials_path: Optional[str] = None
     
     # Export Settings
     max_export_rows: int = 10000
@@ -64,6 +71,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Allow extra fields from old .env
     
     @property
     def allowed_extensions(self) -> List[str]:
@@ -77,6 +85,8 @@ class Settings(BaseSettings):
     
     def validate_email_provider(self) -> bool:
         """Validate that required email provider credentials are set."""
+        if self.email_provider == "none":
+            return True  # Email is optional
         if self.email_provider == "sendgrid":
             return bool(self.sendgrid_webhook_secret and self.sendgrid_inbound_domain)
         elif self.email_provider == "mailgun":
@@ -87,38 +97,33 @@ class Settings(BaseSettings):
         """Validate that all required settings are present. Returns (is_valid, missing_fields)."""
         missing = []
         
-        if not self.secret_key:
-            missing.append("SECRET_KEY")
-        if not self.supabase_url:
-            missing.append("SUPABASE_URL")
-        if not self.supabase_key:
-            missing.append("SUPABASE_KEY")
-        if not self.supabase_service_key:
-            missing.append("SUPABASE_SERVICE_KEY")
-        if not self.gemini_api_key:
-            missing.append("GEMINI_API_KEY")
+        # OpenRouter is optional - we'll warn but not fail
+        # This keeps the app functional even without AI features
         
         return len(missing) == 0, missing
+    
+    def get_ai_status(self) -> Dict[str, Any]:
+        """Get status of AI services."""
+        return {
+            "openrouter_configured": bool(self.openrouter_api_key),
+            "deepseek_configured": bool(self.deepseek_api_key),
+            "preferred_model": self.openrouter_model if self.openrouter_api_key else self.deepseek_model,
+            "rag_available": None,  # Will be set at runtime
+        }
 
 
 # Global settings instance - initialize with error handling
 try:
     settings = Settings()
 except Exception as e:
-    # If Settings initialization fails completely, create minimal settings for health check
+    # If Settings initialization fails completely, create minimal settings
     print(f"Warning: Failed to load settings: {e}", file=sys.stderr)
-    # Create a minimal settings object with defaults
-    settings = Settings(
-        secret_key=os.getenv("SECRET_KEY", ""),
-        supabase_url=os.getenv("SUPABASE_URL", ""),
-        supabase_key=os.getenv("SUPABASE_KEY", ""),
-        supabase_service_key=os.getenv("SUPABASE_SERVICE_KEY", ""),
-        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
-    )
+    settings = Settings()
 
 # Ensure required directories exist (with error handling)
 try:
     os.makedirs(settings.export_temp_dir, exist_ok=True)
     os.makedirs(os.path.dirname(settings.log_file), exist_ok=True)
+    os.makedirs("./data", exist_ok=True)  # For SQLite and ChromaDB
 except Exception as e:
     print(f"Warning: Failed to create directories: {e}", file=sys.stderr)

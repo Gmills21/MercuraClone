@@ -1,0 +1,117 @@
+/* OpenMercura Gmail Add-in Styles */
+
+.openmercura-btn {
+    display: inline-flex;
+    align-items: center;
+    background: #ea580c;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    margin-left: 8px;
+    border: none;
+    transition: background 0.2s;
+}
+
+.openmercura-btn:hover {
+    background: #c2410c;
+}
+
+.openmercura-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    width: 400px;
+    max-height: 500px;
+    z-index: 9999;
+    font-family: 'Google Sans', Roboto, sans-serif;
+}
+
+.om-popup-header {
+    background: #1a1f36;
+    color: white;
+    padding: 16px;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.om-popup-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.om-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.om-popup-body {
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.om-item {
+    padding: 12px;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 14px;
+}
+
+.om-item:last-child {
+    border-bottom: none;
+}
+
+.om-total {
+    padding: 16px;
+    background: #f9fafb;
+    border-radius: 4px;
+    margin-top: 12px;
+    font-size: 16px;
+}
+
+.om-popup-footer {
+    padding: 16px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.om-btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    text-decoration: none;
+}
+
+.om-btn-primary {
+    background: #ea580c;
+    color: white;
+}
+
+.om-btn-primary:hover {
+    background: #c2410c;
+}
+
+.om-btn-secondary {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.om-btn-secondary:hover {
+    background: #e5e7eb;
+}

@@ -3,17 +3,27 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# Database
-supabase==2.6.0
-# psycopg2-binary==2.9.9  # Not needed - Supabase client handles connections
+# Database (Local SQLite - FREE)
+# No external database needed - uses local SQLite
 
-# AI/ML
-google-generativeai
+# AI/ML (OpenRouter Free Tier)
+# google-generativeai  # PAID - REMOVED
+
+# Web Scraping (FREE)
+beautifulsoup4==4.12.3
+
+# Vector DB for RAG (FREE, Local)
+chromadb==0.4.22
+sentence-transformers==2.3.1
 
 # Data Processing
 pandas>=2.2.0
 openpyxl==3.1.2
 xlsxwriter==3.1.9
+
+# Image Processing & OCR
+Pillow==10.2.0
+pytesseract==0.3.10
 
 # Email Processing
 email-validator==2.1.0

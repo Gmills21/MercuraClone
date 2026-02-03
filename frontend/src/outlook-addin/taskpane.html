@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMercura Quote Extractor</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: #1a1f36;
+            color: white;
+            padding: 12px 16px;
+            margin: -16px -16px 16px -16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .header img {
+            width: 24px;
+            height: 24px;
+        }
+        
+        .header h1 {
+            font-size: 16px;
+            margin: 0;
+        }
+        
+        .btn-primary {
+            background: #ea580c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+        
+        .btn-primary:hover {
+            background: #c2410c;
+        }
+        
+        .btn-primary:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            background: white;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 12px;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .item {
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 13px;
+        }
+        
+        .item:last-child {
+            border-bottom: none;
+        }
+        
+        .item-name {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .item-details {
+            color: #6b7280;
+            margin-top: 2px;
+        }
+        
+        .total {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 12px;
+            font-weight: 600;
+            text-align: right;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #6b7280;
+        }
+        
+        .error {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        .actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            flex: 1;
+        }
+        
+        .btn-secondary:hover {
+            background: #f9fafb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="width: 24px; height: 24px; background: #ea580c; border-radius: 50%;"></div>
+        <h1>OpenMercura</h1>
+    </div>
+    
+    <button id="extractBtn" class="btn-primary">Extract Quote from Email</button>
+    
+    <div id="results"></div>
+
+    <script>
+        const API_BASE_URL = 'http://127.0.0.1:9000';
+        
+        Office.onReady(() => {
+            document.getElementById('extractBtn').onclick = extractQuote;
+        });
+        
+        async function extractQuote() {
+            const btn = document.getElementById('extractBtn');
+            const resultsDiv = document.getElementById('results');
+            
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+            resultsDiv.innerHTML = '<div class="loading">Analyzing email...</div>';
+            
+            try {
+                // Get email details from Outlook
+                const item = Office.context.mailbox.item;
+                const body = await getEmailBody(item);
+                
+                // Send to OpenMercura API
+                const response = await fetch(`${API_BASE_URL}/extractions/parse`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: body,
+                        source_type: 'outlook'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResults(data);
+                } else {
+                    resultsDiv.innerHTML = `<div class="error">${data.detail || 'Extraction failed'}</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Extraction error:', error);
+                resultsDiv.innerHTML = '<div class="error">Failed to extract quote. Please try again.</div>';
+            }
+            
+            btn.disabled = false;
+            btn.textContent = 'Extract Quote from Email';
+        }
+        
+        function getEmailBody(item) {
+            return new Promise((resolve, reject) => {
+                item.body.getAsync(Office.CoercionType.Text, (result) => {
+                    if (result.status === Office.AsyncResultStatus.Succeeded) {
+                        resolve(result.value);
+                    } else {
+                        reject(result.error);
+                    }
+                });
+            });
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const items = data.parsed_data?.line_items || [];
+            const total = data.parsed_data?.total_amount || 0;
+            
+            let itemsHtml = items.map(item => `
+                <div class="item">
+                    <div class="item-name">${item.item_name}</div>
+                    <div class="item-details">
+                        Qty: ${item.quantity} × $${item.unit_price} = $${item.total_price}
+                    </div>
+                </div>
+            `).join('');
+            
+            resultsDiv.innerHTML = `
+                <div class="results">
+                    <h3 style="margin-top: 0; font-size: 14px;">Extracted Items</h3>
+                    ${itemsHtml}
+                    <div class="total">
+                        Total: $${total}
+                    </div>
+                    <div class="actions">
+                        <button class="btn-secondary" onclick="window.open('${API_BASE_URL}/extractions/${data.id}', '_blank')">
+                            View in OpenMercura
+                        </button>
+                        <button class="btn-secondary" onclick="createQuote('${data.id}')">
+                            Create Quote
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        async function createQuote(extractionId) {
+            // This would create a quote from the extraction
+            alert('Quote creation feature - integrate with your CRM');
+        }
+    </script>
+</body>
+</html>

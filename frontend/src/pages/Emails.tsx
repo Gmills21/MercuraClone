@@ -214,8 +214,8 @@ export const Emails = () => {
                             onClick={() => setStatusFilter(status)}
                             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
                                 statusFilter === status
-                                    ? 'bg-primary-500/20 text-primary-400 border-primary-500/30'
-                                    : 'bg-slate-800/50 text-slate-400 border-slate-700 hover:bg-slate-800 hover:text-slate-200'
+                                    ? 'bg-slate-800 text-slate-200 border-slate-700'
+                                    : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-100'
                             }`}
                         >
                             {status === '' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}

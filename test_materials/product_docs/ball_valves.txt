@@ -1,0 +1,141 @@
+# Ball Valve Technical Specifications
+## Product Information Document
+
+### Overview
+A ball valve is a form of quarter-turn valve which uses a hollow, perforated and pivoting ball to control flow through it. It is open when the ball's hole is in line with the flow and closed when it is pivoted 90-degrees by the valve handle. The handle lies flat in alignment with the flow when open, and is perpendicular to it when closed, making for easy visual confirmation of the valve's status.
+
+### Types of Ball Valves
+
+**1. Full Port Ball Valve**
+- Has an oversized ball so that the hole in the ball is the same size as the pipeline
+- Results in lower friction loss and allows for pigging
+- Flow path is straight with minimal pressure drop
+- Best for: Applications requiring pigging, throttling service
+
+**2. Reduced Port (Standard Port) Ball Valve**
+- Flow through the valve is one pipe size smaller than the valve's pipe size
+- Results in slightly higher velocity but lower cost
+- More economical choice for most applications
+- Best for: General purpose on/off service
+
+**3. V-Port Ball Valve**
+- Has a "V" shaped ball or seat
+- Allows for precise flow control and modulating applications
+- Linear flow characteristics
+- Best for: Flow control, modulating service
+
+**4. Multi-Port Ball Valve**
+- Has multiple ports (3-way or 4-way configurations)
+- Allows for flow direction changes
+- Common in mixing or diverting applications
+- Best for: Diverting flow, mixing applications
+
+### Common Specifications
+
+**Materials:**
+- Body: Stainless steel 316, Carbon steel A216 WCB, Brass C36000
+- Ball: Stainless steel 316, Chrome-plated steel
+- Seats: PTFE (Teflon), RPTFE, PEEK, Metal (for high temp)
+- Stem: Stainless steel 316
+
+**Pressure Ratings:**
+- 150 PSI (WOG) - Standard water, oil, gas
+- 300 PSI - Medium pressure
+- 600 PSI - High pressure industrial
+- 1000+ PSI - Severe service
+
+**Temperature Ranges:**
+- PTFE Seats: -20°F to 450°F (-29°C to 232°C)
+- Metal Seats: Up to 1000°F (538°C)
+- PEEK Seats: -70°F to 600°F (-57°C to 315°C)
+
+**End Connections:**
+- Threaded NPT (National Pipe Thread)
+- Socket weld
+- Butt weld
+- Flanged (ANSI 150#, 300#, 600#)
+- Tri-clamp (sanitary)
+
+### Applications by Industry
+
+**Oil & Gas:**
+- Pipeline isolation
+- Wellhead equipment
+- Tank farm switching
+- Corrosion-resistant alloys required
+
+**Chemical Processing:**
+- Aggressive media handling
+- High purity applications
+- Steam service
+- Material compatibility critical
+
+**Water & Wastewater:**
+- Distribution systems
+- Treatment plants
+- Isolation and bypass
+- Ductile iron or stainless preferred
+
+**Food & Beverage:**
+- Sanitary applications
+- 3A certified required
+- Tri-clamp connections
+- 316L stainless steel
+
+**HVAC:**
+- Heating/cooling systems
+- Balancing applications
+- Bronze or brass construction
+- Lower pressure ratings acceptable
+
+### Lead Times (Typical)
+- Standard catalog items: 1-2 weeks
+- Configured valves: 3-4 weeks
+- Special materials: 6-8 weeks
+- Large quantity orders: Add 1-2 weeks
+
+### Pricing Guidelines (2024)
+Note: Pricing varies significantly by manufacturer, quantity, and specifications
+
+**Threaded Bronze Ball Valves:**
+- 1/2": $15-25
+- 1": $25-40
+- 2": $60-100
+
+**Stainless Steel Ball Valves:**
+- 1/2": $40-80
+- 1": $80-150
+- 2": $200-400
+
+**Flanged Carbon Steel:**
+- 2" 150#: $300-600
+- 4" 150#: $600-1200
+- 6" 300#: $1500-3000
+
+**Actuated Ball Valves:**
+- Add $500-2000 for electric actuator
+- Add $300-1000 for pneumatic actuator
+
+### Key Manufacturers
+- Velan
+- Neway
+- Crane
+- Kitz
+- Flowserve
+- Cameron
+- Apollo
+- Milwaukee Valve
+
+### Standards & Certifications
+- API 6D (Pipeline valves)
+- API 608 (Metal ball valves)
+- ASME B16.34 (Valves general)
+- ISO 9001 (Quality)
+- Fire-safe API 607
+- NACE MR0175 (Sour service)
+
+### Maintenance
+- Generally maintenance-free under normal conditions
+- Seats may need replacement after 500,000+ cycles
+- Stem packing adjustable on some designs
+- Lubrication not required for most PTFE-seated valves
