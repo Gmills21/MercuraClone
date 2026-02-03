@@ -70,21 +70,25 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS customers (
                 id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
                 name TEXT NOT NULL,
-                email TEXT UNIQUE,
+                email TEXT,
                 company TEXT,
                 phone TEXT,
                 address TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
             )
         """)
         
         # Products table
+        # Products table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id TEXT PRIMARY KEY,
-                sku TEXT UNIQUE NOT NULL,
+                organization_id TEXT NOT NULL,
+                sku TEXT NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT,
                 price REAL NOT NULL,
@@ -92,14 +96,18 @@ def init_db():
                 category TEXT,
                 competitor_sku TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                UNIQUE(organization_id, sku)
             )
         """)
         
         # Quotes table
+        # Quotes table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS quotes (
                 id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
                 customer_id TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'draft',
                 subtotal REAL NOT NULL DEFAULT 0,
@@ -111,7 +119,8 @@ def init_db():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 expires_at TEXT,
-                FOREIGN KEY (customer_id) REFERENCES customers (id)
+                FOREIGN KEY (customer_id) REFERENCES customers (id),
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
             )
         """)
         
@@ -133,10 +142,12 @@ def init_db():
         """)
         
         # Competitors table
+        # Competitors table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS competitors (
                 id TEXT PRIMARY KEY,
-                url TEXT UNIQUE NOT NULL,
+                organization_id TEXT NOT NULL,
+                url TEXT NOT NULL,
                 name TEXT NOT NULL,
                 title TEXT,
                 description TEXT,
@@ -144,37 +155,139 @@ def init_db():
                 pricing TEXT,
                 features TEXT,
                 last_updated TEXT NOT NULL,
-                error TEXT
+                error TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                UNIQUE(organization_id, url)
             )
         """)
         
         # Documents table (for RAG)
+        # Documents table (for RAG)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 source TEXT NOT NULL,
                 type TEXT NOT NULL,
                 metadata TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
             )
         """)
         
         # Extractions table (CRM data capture)
+        # Extractions table (CRM data capture)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS extractions (
                 id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
                 source_type TEXT NOT NULL,
                 source_content TEXT,
                 parsed_data TEXT NOT NULL,
                 confidence_score REAL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
-                processed_at TEXT
+                processed_at TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Organizations table (multi-tenant root)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS organizations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                domain TEXT,
+                owner_user_id TEXT NOT NULL,
+                subscription_id TEXT,
+                status TEXT CHECK (status IN ('trial', 'active', 'suspended', 'canceled')) DEFAULT 'trial',
+                seats_total INTEGER DEFAULT 1,
+                seats_used INTEGER DEFAULT 0,
+                settings TEXT,
+                branding TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trial_ends_at TEXT,
+                metadata TEXT
+            )
+        """)
+        
+        # Organization Members (users belong to orgs)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS organization_members (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                invited_by TEXT,
+                joined_at TEXT NOT NULL,
+                last_active_at TEXT,
+                permissions TEXT,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(organization_id, user_id)
+            )
+        """)
+        
+        # Organization Invitations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS organization_invitations (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'sales_rep',
+                token TEXT UNIQUE NOT NULL,
+                invited_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                status TEXT CHECK (status IN ('pending', 'accepted', 'expired', 'canceled')) DEFAULT 'pending',
+                accepted_at TEXT,
+                accepted_by TEXT,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY (invited_by) REFERENCES users(id)
+            )
+        """)
+        
+        # Sessions table (persistent token storage)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                organization_id TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_used_at TEXT NOT NULL,
+                user_agent TEXT,
+                ip_address TEXT,
+                is_active INTEGER DEFAULT 1,
+                metadata TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+            )
+        """)
+        
+        # Password Reset Tokens
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                is_used INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
         
         # Create indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_org ON customers (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_email ON customers (email)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_customer ON quotes (customer_id)")
@@ -182,8 +295,29 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitors_url ON competitors (url)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents (type)")
         
+        # Organization indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_email ON organization_invitations(email)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_token ON organization_invitations(token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token)")
+        
+        conn.commit()
         conn.commit()
         logger.info("Database initialized successfully")
+
+
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get user by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 
 # Customer operations
@@ -193,10 +327,11 @@ def create_customer(customer: Dict[str, Any]) -> bool:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO customers (id, name, email, company, phone, address, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO customers (id, organization_id, name, email, company, phone, address, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 customer["id"],
+                customer["organization_id"],
                 customer["name"],
                 customer.get("email"),
                 customer.get("company"),
@@ -212,37 +347,48 @@ def create_customer(customer: Dict[str, Any]) -> bool:
         return False
 
 
-def get_customer_by_id(customer_id: str) -> Optional[Dict[str, Any]]:
-    """Get customer by ID."""
+def get_customer_by_id(customer_id: str, organization_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get customer by ID.
+    If organization_id is provided, ensures the customer belongs to that organization.
+    """
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM customers WHERE id = ?", (customer_id,))
+        if organization_id:
+            cursor.execute("SELECT * FROM customers WHERE id = ? AND organization_id = ?", (customer_id, organization_id))
+        else:
+            # TODO: Deprecate calling without organization_id
+            cursor.execute("SELECT * FROM customers WHERE id = ?", (customer_id,))
+            
         row = cursor.fetchone()
         return dict(row) if row else None
 
 
-def get_customer_by_email(email: str) -> Optional[Dict[str, Any]]:
-    """Get customer by email."""
+def get_customer_by_email(email: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get customer by email within an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM customers WHERE email = ?", (email,))
+        cursor.execute("SELECT * FROM customers WHERE email = ? AND organization_id = ?", (email, organization_id))
         row = cursor.fetchone()
         return dict(row) if row else None
 
 
-def list_customers(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    """List all customers."""
+def list_customers(organization_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all customers for an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM customers ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset)
+            "SELECT * FROM customers WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (organization_id, limit, offset)
         )
         return [dict(row) for row in cursor.fetchall()]
 
 
-def update_customer(customer_id: str, updates: Dict[str, Any]) -> bool:
-    """Update customer fields."""
+def update_customer(customer_id: str, updates: Dict[str, Any], organization_id: Optional[str] = None) -> bool:
+    """
+    Update customer fields.
+    If organization_id is provided, ensures ownership.
+    """
     allowed_fields = ["name", "email", "company", "phone", "address"]
     set_clause = ", ".join([f"{k} = ?" for k in updates.keys() if k in allowed_fields])
     if not set_clause:
@@ -252,12 +398,14 @@ def update_customer(customer_id: str, updates: Dict[str, Any]) -> bool:
     values.append(datetime.utcnow().isoformat())
     values.append(customer_id)
     
+    query = f"UPDATE customers SET {set_clause}, updated_at = ? WHERE id = ?"
+    if organization_id:
+        query += " AND organization_id = ?"
+        values.append(organization_id)
+        
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(f"""
-            UPDATE customers SET {set_clause}, updated_at = ?
-            WHERE id = ?
-        """, values)
+        cursor.execute(query, values)
         conn.commit()
         return cursor.rowcount > 0
 
@@ -269,10 +417,11 @@ def create_product(product: Dict[str, Any]) -> bool:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO products (id, sku, name, description, price, cost, category, competitor_sku, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO products (id, organization_id, sku, name, description, price, cost, category, competitor_sku, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 product["id"],
+                product["organization_id"],
                 product["sku"],
                 product["name"],
                 product.get("description"),
@@ -290,34 +439,38 @@ def create_product(product: Dict[str, Any]) -> bool:
         return False
 
 
-def get_product_by_sku(sku: str) -> Optional[Dict[str, Any]]:
-    """Get product by SKU."""
+def get_product_by_sku(sku: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get product by SKU within organization."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM products WHERE sku = ?", (sku,))
+        cursor.execute("SELECT * FROM products WHERE sku = ? AND organization_id = ?", (sku, organization_id))
         row = cursor.fetchone()
         return dict(row) if row else None
 
 
-def list_products(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    """List all products."""
+def list_products(organization_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all products for an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM products ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset)
+            "SELECT * FROM products WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (organization_id, limit, offset)
         )
         return [dict(row) for row in cursor.fetchall()]
 
 
 # Quote operations
-def get_quote_with_items(quote_id: str) -> Optional[Dict[str, Any]]:
-    """Get quote with all items."""
+def get_quote_with_items(quote_id: str, organization_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get quote with all items. If organization_id provided, validates ownership."""
     with get_db() as conn:
         cursor = conn.cursor()
         
         # Get quote
-        cursor.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,))
+        if organization_id:
+            cursor.execute("SELECT * FROM quotes WHERE id = ? AND organization_id = ?", (quote_id, organization_id))
+        else:
+            cursor.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,))
+            
         row = cursor.fetchone()
         if not row:
             return None
@@ -337,10 +490,11 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO quotes (id, customer_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO quotes (id, organization_id, customer_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote["id"],
+                quote["organization_id"],
                 quote["customer_id"],
                 quote.get("status", "draft"),
                 quote.get("subtotal", 0),
@@ -355,7 +509,7 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             ))
             conn.commit()
             # Return the created quote
-            return get_quote_with_items(quote["id"])
+            return get_quote_with_items(quote["id"], quote["organization_id"])
     except sqlite3.IntegrityError as e:
         logger.error(f"Quote creation failed: {e}")
         return None
@@ -363,6 +517,7 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def add_quote_item(item: Dict[str, Any]) -> bool:
     """Add item to quote."""
+    # Note: Authorization should be checked before calling this
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -384,46 +539,69 @@ def add_quote_item(item: Dict[str, Any]) -> bool:
         return True
 
 
-def list_quotes(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    """List all quotes."""
+def list_quotes(organization_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all quotes for an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM quotes ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset)
+            "SELECT * FROM quotes WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (organization_id, limit, offset)
         )
         return [dict(row) for row in cursor.fetchall()]
+
+
+def get_quote_by_token(token: str) -> Optional[Dict[str, Any]]:
+    """Get quote by public token."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM quotes WHERE token = ?", (token,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        
+        quote = dict(row)
+        
+        # Get items
+        cursor.execute("SELECT * FROM quote_items WHERE quote_id = ?", (quote["id"],))
+        quote["items"] = [dict(r) for r in cursor.fetchall()]
+        
+        return quote
 
 
 # Competitor operations
 def save_competitor(competitor: Dict[str, Any]) -> bool:
     """Save or update competitor data."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO competitors (id, url, name, title, description, keywords, pricing, features, last_updated, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            competitor.get("id") or competitor["url"],
-            competitor["url"],
-            competitor.get("name", "Unknown"),
-            competitor.get("title"),
-            competitor.get("description"),
-            json.dumps(competitor.get("keywords", [])),
-            competitor.get("pricing"),
-            json.dumps(competitor.get("features", [])),
-            competitor.get("last_updated", datetime.utcnow().isoformat()),
-            competitor.get("error")
-        ))
-        conn.commit()
-        return True
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO competitors (id, organization_id, url, name, title, description, keywords, pricing, features, last_updated, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                competitor.get("id") or competitor["url"],
+                competitor["organization_id"],
+                competitor["url"],
+                competitor.get("name", "Unknown"),
+                competitor.get("title"),
+                competitor.get("description"),
+                json.dumps(competitor.get("keywords", [])),
+                competitor.get("pricing"),
+                json.dumps(competitor.get("features", [])),
+                competitor.get("last_updated", datetime.utcnow().isoformat()),
+                competitor.get("error")
+            ))
+            conn.commit()
+            return True
+    except sqlite3.IntegrityError as e:
+        logger.error(f"Competitor save failed: {e}")
+        return False
 
 
-def get_competitor_by_url(url: str) -> Optional[Dict[str, Any]]:
-    """Get competitor by URL."""
+def get_competitor_by_url(url: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get competitor by URL for an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM competitors WHERE url = ?", (url,))
+        cursor.execute("SELECT * FROM competitors WHERE url = ? AND organization_id = ?", (url, organization_id))
         row = cursor.fetchone()
         if row:
             data = dict(row)
@@ -433,11 +611,11 @@ def get_competitor_by_url(url: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def list_competitors() -> List[Dict[str, Any]]:
-    """List all competitors."""
+def list_competitors(organization_id: str) -> List[Dict[str, Any]]:
+    """List all competitors for an organization."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM competitors ORDER BY last_updated DESC")
+        cursor.execute("SELECT * FROM competitors WHERE organization_id = ? ORDER BY last_updated DESC", (organization_id,))
         results = []
         for row in cursor.fetchall():
             data = dict(row)
@@ -453,10 +631,11 @@ def save_document(doc: Dict[str, Any]) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO documents (id, content, source, type, metadata, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO documents (id, organization_id, content, source, type, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             doc["id"],
+            doc["organization_id"],
             doc["content"],
             doc["source"],
             doc["type"],
@@ -467,14 +646,14 @@ def save_document(doc: Dict[str, Any]) -> bool:
         return True
 
 
-def list_documents(doc_type: Optional[str] = None) -> List[Dict[str, Any]]:
-    """List documents, optionally filtered by type."""
+def list_documents(organization_id: str, doc_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """List documents for an organization, optionally filtered by type."""
     with get_db() as conn:
         cursor = conn.cursor()
         if doc_type:
-            cursor.execute("SELECT * FROM documents WHERE type = ? ORDER BY created_at DESC", (doc_type,))
+            cursor.execute("SELECT * FROM documents WHERE organization_id = ? AND type = ? ORDER BY created_at DESC", (organization_id, doc_type))
         else:
-            cursor.execute("SELECT * FROM documents ORDER BY created_at DESC")
+            cursor.execute("SELECT * FROM documents WHERE organization_id = ? ORDER BY created_at DESC", (organization_id,))
         
         results = []
         for row in cursor.fetchall():
@@ -490,10 +669,11 @@ def save_extraction(extraction: Dict[str, Any]) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO extractions (id, source_type, source_content, parsed_data, confidence_score, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO extractions (id, organization_id, source_type, source_content, parsed_data, confidence_score, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             extraction["id"],
+            extraction["organization_id"],
             extraction["source_type"],
             extraction.get("source_content"),
             json.dumps(extraction["parsed_data"]),
@@ -505,14 +685,14 @@ def save_extraction(extraction: Dict[str, Any]) -> bool:
         return True
 
 
-def list_extractions(status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """List extractions, optionally filtered by status."""
+def list_extractions(organization_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """List extractions for an organization, optionally filtered by status."""
     with get_db() as conn:
         cursor = conn.cursor()
         if status:
-            cursor.execute("SELECT * FROM extractions WHERE status = ? ORDER BY created_at DESC", (status,))
+            cursor.execute("SELECT * FROM extractions WHERE organization_id = ? AND status = ? ORDER BY created_at DESC", (organization_id, status))
         else:
-            cursor.execute("SELECT * FROM extractions ORDER BY created_at DESC")
+            cursor.execute("SELECT * FROM extractions WHERE organization_id = ? ORDER BY created_at DESC", (organization_id,))
         
         results = []
         for row in cursor.fetchall():

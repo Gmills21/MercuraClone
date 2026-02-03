@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
+from fastapi import Header, HTTPException
+
 # Simple token-based auth (no JWT for simplicity)
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
@@ -217,3 +219,12 @@ def list_users(company_id: str) -> List[User]:
             ))
     
     return users
+
+
+# FastAPI dependency for extracting user ID from header
+def get_current_user_id(x_user_id: Optional[str] = Header(None, alias="X-User-ID")) -> str:
+    """Get current user ID from request header."""
+    if x_user_id:
+        return x_user_id
+    # Return a default test user ID for development
+    return "3d4df718-47c3-4903-b09e-711090412204"

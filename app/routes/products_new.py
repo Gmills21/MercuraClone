@@ -11,6 +11,8 @@ import pandas as pd
 import io
 
 from app.database_sqlite import create_product, get_product_by_sku, list_products
+from fastapi import Depends
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -39,13 +41,18 @@ class ProductResponse(BaseModel):
 
 
 @router.post("/", response_model=ProductResponse)
-async def create_product_endpoint(product: ProductCreate):
+async def create_product_endpoint(
+    product: ProductCreate,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Create a new product."""
+    user_id, org_id = user_org
     now = datetime.utcnow().isoformat()
     product_id = str(uuid.uuid4())
     
     product_data = {
         "id": product_id,
+        "organization_id": org_id,
         "sku": product.sku,
         "name": product.name,
         "description": product.description,
@@ -63,24 +70,37 @@ async def create_product_endpoint(product: ProductCreate):
 
 
 @router.get("/", response_model=List[ProductResponse])
-async def list_products_endpoint(limit: int = 100, offset: int = 0):
+async def list_products_endpoint(
+    limit: int = 100, 
+    offset: int = 0,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """List all products."""
-    products = list_products(limit, offset)
+    user_id, org_id = user_org
+    products = list_products(organization_id=org_id, limit=limit, offset=offset)
     return [ProductResponse(**p) for p in products]
 
 
 @router.get("/sku/{sku}", response_model=ProductResponse)
-async def get_product_by_sku_endpoint(sku: str):
+async def get_product_by_sku_endpoint(
+    sku: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Get product by SKU."""
-    product = get_product_by_sku(sku)
+    user_id, org_id = user_org
+    product = get_product_by_sku(sku, organization_id=org_id)
     if product:
         return ProductResponse(**product)
     raise HTTPException(status_code=404, detail="Product not found")
 
 
 @router.post("/upload")
-async def upload_products(file: UploadFile = File(...)):
+async def upload_products(
+    file: UploadFile = File(...),
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Upload products from CSV/Excel."""
+    user_id, org_id = user_org
     try:
         contents = await file.read()
         
@@ -117,6 +137,7 @@ async def upload_products(file: UploadFile = File(...)):
             now = datetime.utcnow().isoformat()
             product_data = {
                 "id": str(uuid.uuid4()),
+                "organization_id": org_id,
                 "sku": str(sku).strip(),
                 "name": str(name).strip(),
                 "description": str(row.get('description')) if pd.notna(row.get('description')) else None,

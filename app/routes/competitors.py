@@ -12,6 +12,8 @@ import uuid
 from app.competitor_scraper import CompetitorScraper, scrape_multiple
 from app.deepseek_service import get_deepseek_service
 from app.database_sqlite import save_competitor, get_competitor_by_url, list_competitors
+from fastapi import Depends
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/competitors", tags=["competitors"])
 
@@ -38,13 +40,17 @@ class CompetitorResponse(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze_competitor(request: CompetitorAnalyzeRequest):
+async def analyze_competitor(
+    request: CompetitorAnalyzeRequest,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Analyze a competitor website.
     Scrapes the site and uses AI to extract insights.
     """
     scraper = CompetitorScraper()
     deepseek = get_deepseek_service()
+    user_id, org_id = user_org
     
     # Scrape the website
     scraped = await scraper.scrape(request.url)
@@ -53,6 +59,7 @@ async def analyze_competitor(request: CompetitorAnalyzeRequest):
         # Save error state
         competitor_data = {
             "id": str(uuid.uuid4()),
+            "organization_id": org_id,
             "url": request.url,
             "name": "Unknown",
             "error": scraped.get("error", "Unknown error"),
@@ -70,6 +77,7 @@ async def analyze_competitor(request: CompetitorAnalyzeRequest):
     # Save to database
     competitor_data = {
         "id": str(uuid.uuid4()),
+        "organization_id": org_id,
         "url": request.url,
         "name": analysis.get("name", "Unknown"),
         "title": scraped.get("title"),
@@ -86,8 +94,12 @@ async def analyze_competitor(request: CompetitorAnalyzeRequest):
 
 
 @router.post("/analyze-batch")
-async def analyze_competitors_batch(request: CompetitorBatchRequest):
+async def analyze_competitors_batch(
+    request: CompetitorBatchRequest,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Analyze multiple competitor websites."""
+    user_id, org_id = user_org
     scraper = CompetitorScraper()
     deepseek = get_deepseek_service()
     
@@ -95,7 +107,7 @@ async def analyze_competitors_batch(request: CompetitorBatchRequest):
     
     for url in request.urls:
         # Check if already analyzed
-        existing = get_competitor_by_url(url)
+        existing = get_competitor_by_url(url, organization_id=org_id)
         if existing and not existing.get("error"):
             results.append(existing)
             continue
@@ -115,6 +127,7 @@ async def analyze_competitors_batch(request: CompetitorBatchRequest):
         
         competitor_data = {
             "id": str(uuid.uuid4()),
+            "organization_id": org_id,
             "url": url,
             "name": analysis.get("name", "Unknown"),
             "title": scraped.get("title"),
@@ -132,9 +145,12 @@ async def analyze_competitors_batch(request: CompetitorBatchRequest):
 
 
 @router.get("/", response_model=List[CompetitorResponse])
-async def list_competitors_endpoint():
+async def list_competitors_endpoint(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """List all analyzed competitors."""
-    competitors = list_competitors()
+    user_id, org_id = user_org
+    competitors = list_competitors(organization_id=org_id)
     return [
         CompetitorResponse(
             id=c["id"],
@@ -153,9 +169,13 @@ async def list_competitors_endpoint():
 
 
 @router.get("/{competitor_id}")
-async def get_competitor(competitor_id: str):
+async def get_competitor(
+    competitor_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Get competitor by ID."""
-    competitors = list_competitors()
+    user_id, org_id = user_org
+    competitors = list_competitors(organization_id=org_id)
     for c in competitors:
         if c["id"] == competitor_id:
             return c
@@ -163,15 +183,18 @@ async def get_competitor(competitor_id: str):
 
 
 @router.post("/compare")
-async def compare_with_products():
+async def compare_with_products(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Compare competitors with our products.
     Returns price/feature comparisons where SKUs are mapped.
     """
+    user_id, org_id = user_org
     from app.database_sqlite import list_products, list_competitors
     
-    products = list_products()
-    competitors = list_competitors()
+    products = list_products(organization_id=org_id)
+    competitors = list_competitors(organization_id=org_id)
     
     comparisons = []
     

@@ -10,6 +10,8 @@ from typing import List, Optional, Dict, Any
 from app.rag_service import get_rag_service, chat_with_data
 from app.database_sqlite import save_document, list_documents
 from app.deepseek_service import get_deepseek_service
+from fastapi import Depends
+from app.middleware.organization import get_current_user_and_org
 from datetime import datetime
 import uuid
 
@@ -45,7 +47,10 @@ async def chat_endpoint(request: ChatRequest):
 
 
 @router.post("/documents")
-async def add_document(request: DocumentUploadRequest):
+async def add_document(
+    request: DocumentUploadRequest,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Add a document to the RAG knowledge base."""
     rag = get_rag_service()
     
@@ -63,6 +68,7 @@ async def add_document(request: DocumentUploadRequest):
     # Also save to SQLite for persistence
     doc_data = {
         "id": doc_id,
+        "organization_id": user_org[1],
         "content": request.content[:500],  # Preview
         "source": request.source,
         "type": request.doc_type,
@@ -75,9 +81,13 @@ async def add_document(request: DocumentUploadRequest):
 
 
 @router.get("/documents")
-async def list_documents_endpoint(doc_type: Optional[str] = None):
+async def list_documents_endpoint(
+    doc_type: Optional[str] = None,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """List documents in the knowledge base."""
-    docs = list_documents(doc_type)
+    user_id, org_id = user_org
+    docs = list_documents(organization_id=org_id, doc_type=doc_type)
     return {"documents": docs, "count": len(docs)}
 
 
@@ -102,16 +112,19 @@ async def search_documents(query: str, n_results: int = 5, doc_type: Optional[st
 
 
 @router.post("/ingest/quotes")
-async def ingest_all_quotes():
+async def ingest_all_quotes(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Ingest all existing quotes into RAG for searching."""
     from app.database_sqlite import list_quotes, get_quote_with_items
     
     rag = get_rag_service()
-    quotes = list_quotes(limit=1000)
+    user_id, org_id = user_org
+    quotes = list_quotes(organization_id=org_id, limit=1000)
     
     ingested = 0
     for q in quotes:
-        quote = get_quote_with_items(q["id"])
+        quote = get_quote_with_items(q["id"], organization_id=org_id)
         if quote:
             # Create searchable content
             items_text = "\n".join([
@@ -138,12 +151,15 @@ Items:
 
 
 @router.post("/ingest/products")
-async def ingest_all_products():
+async def ingest_all_products(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Ingest all products into RAG for searching."""
     from app.database_sqlite import list_products
     
     rag = get_rag_service()
-    products = list_products(limit=1000)
+    user_id, org_id = user_org
+    products = list_products(organization_id=org_id, limit=1000)
     
     ingested = 0
     for p in products:

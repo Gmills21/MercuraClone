@@ -10,6 +10,8 @@ import uuid
 
 from app.database_sqlite import save_extraction, list_extractions
 from app.services.extraction_engine import extraction_engine
+from fastapi import Depends
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/extractions", tags=["extractions"])
 
@@ -29,7 +31,10 @@ class ExtractionResponse(BaseModel):
 
 
 @router.post("/parse", response_model=ExtractionResponse)
-async def parse_text(request: ExtractionRequest):
+async def parse_text(
+    request: ExtractionRequest,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Parse unstructured text into structured data.
     Uses unified extraction engine with DeepSeek AI.
@@ -60,6 +65,7 @@ async def parse_text(request: ExtractionRequest):
     
     extraction_data = {
         "id": extraction_id,
+        "organization_id": user_org[1],
         "source_type": request.source_type,
         "source_content": request.text[:1000],  # Store preview
         "parsed_data": parsed_data,
@@ -81,9 +87,13 @@ async def parse_text(request: ExtractionRequest):
 
 
 @router.get("/", response_model=List[ExtractionResponse])
-async def list_extractions_endpoint(status: Optional[str] = None):
+async def list_extractions_endpoint(
+    status: Optional[str] = None,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """List all extractions."""
-    extractions = list_extractions(status)
+    user_id, org_id = user_org
+    extractions = list_extractions(organization_id=org_id, status=status)
     return [
         ExtractionResponse(
             id=e["id"],
@@ -98,7 +108,10 @@ async def list_extractions_endpoint(status: Optional[str] = None):
 
 
 @router.post("/csv/upload")
-async def upload_csv(file: bytes):
+async def upload_csv(
+    file: bytes,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Upload and parse CSV data."""
     import csv
     import io
@@ -113,6 +126,7 @@ async def upload_csv(file: bytes):
         
         extraction_data = {
             "id": extraction_id,
+            "organization_id": user_org[1],
             "source_type": "csv",
             "source_content": f"CSV with {len(rows)} rows",
             "parsed_data": {"rows": rows},

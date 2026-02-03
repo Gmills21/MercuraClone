@@ -10,8 +10,10 @@ import uuid
 
 from app.database_sqlite import (
     create_quote, add_quote_item, get_quote_with_items, list_quotes,
-    get_customer_by_id, get_product_by_sku
+    get_customer_by_id, get_product_by_sku, get_quote_by_token
 )
+from fastapi import Depends
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
@@ -62,10 +64,14 @@ class QuoteResponse(BaseModel):
 
 
 @router.post("/", response_model=QuoteResponse)
-async def create_quote_endpoint(quote: QuoteCreate):
+async def create_quote_endpoint(
+    quote: QuoteCreate,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Create a new quote."""
+    user_id, org_id = user_org
     # Validate customer exists
-    customer = get_customer_by_id(quote.customer_id)
+    customer = get_customer_by_id(quote.customer_id, organization_id=org_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     
@@ -99,6 +105,7 @@ async def create_quote_endpoint(quote: QuoteCreate):
     
     quote_data = {
         "id": quote_id,
+        "organization_id": org_id,
         "customer_id": quote.customer_id,
         "status": "draft",
         "subtotal": subtotal,
@@ -125,35 +132,41 @@ async def create_quote_endpoint(quote: QuoteCreate):
 
 
 @router.get("/", response_model=List[QuoteResponse])
-async def list_quotes_endpoint(limit: int = 100, offset: int = 0):
+async def list_quotes_endpoint(
+    limit: int = 100, 
+    offset: int = 0,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """List all quotes."""
-    quotes = list_quotes(limit, offset)
+    user_id, org_id = user_org
+    quotes = list_quotes(organization_id=org_id, limit=limit, offset=offset)
     # Load items for each quote
     results = []
     for q in quotes:
-        quote_with_items = get_quote_with_items(q["id"])
+        quote_with_items = get_quote_with_items(q["id"], organization_id=org_id)
         if quote_with_items:
             results.append(QuoteResponse(**quote_with_items))
     return results
 
 
 @router.get("/{quote_id}", response_model=QuoteResponse)
-async def get_quote(quote_id: str):
+async def get_quote(
+    quote_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """Get quote by ID."""
-    quote = get_quote_with_items(quote_id)
+    user_id, org_id = user_org
+    quote = get_quote_with_items(quote_id, organization_id=org_id)
     if quote:
         return QuoteResponse(**quote)
     raise HTTPException(status_code=404, detail="Quote not found")
 
 
 @router.get("/token/{token}", response_model=QuoteResponse)
-async def get_quote_by_token(token: str):
+async def get_quote_by_token_endpoint(token: str):
     """Get quote by share token (public access)."""
-    # Find quote by token
-    quotes = list_quotes(1000, 0)
-    for q in quotes:
-        if q.get("token") == token:
-            quote = get_quote_with_items(q["id"])
-            if quote:
-                return QuoteResponse(**quote)
+    # Find quote by token directly
+    quote = get_quote_by_token(token)
+    if quote:
+        return QuoteResponse(**quote)
     raise HTTPException(status_code=404, detail="Quote not found")
