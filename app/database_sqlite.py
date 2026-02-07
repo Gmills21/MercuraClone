@@ -307,8 +307,41 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token)")
         
         conn.commit()
+        _ensure_default_organization(conn)
         conn.commit()
         logger.info("Database initialized successfully")
+
+
+def _ensure_default_organization(conn) -> None:
+    """Ensure default organization exists (for X-User-ID fallback and init)."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM organizations WHERE id = ?", ("default",))
+    if cursor.fetchone():
+        return
+    now = datetime.utcnow().isoformat()
+    # Use first admin user as owner, or placeholder
+    cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+    row = cursor.fetchone()
+    owner_id = row["id"] if row else "admin-001"
+    cursor.execute("""
+        INSERT INTO organizations (id, name, slug, owner_user_id, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'active', ?, ?)
+    """, ("default", "Default Organization", "default", owner_id, now, now))
+    cursor.execute("SELECT id FROM organization_members WHERE organization_id = ? AND user_id = ?", ("default", owner_id))
+    if not cursor.fetchone():
+        import uuid
+        cursor.execute("""
+            INSERT INTO organization_members (id, organization_id, user_id, role, joined_at)
+            VALUES (?, 'default', ?, 'admin', ?)
+        """, (str(uuid.uuid4()), owner_id, now))
+
+
+def get_or_create_default_organization() -> str:
+    """Return default organization id, creating it if needed (for X-User-ID / dev fallback)."""
+    with get_db() as conn:
+        _ensure_default_organization(conn)
+        conn.commit()
+    return "default"
 
 
 def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:

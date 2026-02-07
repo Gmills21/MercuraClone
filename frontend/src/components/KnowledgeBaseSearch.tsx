@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, FileText, Upload, X, Brain, AlertCircle, CheckCircle } from 'lucide-react';
+import { Search, FileText, Upload, Brain, CheckCircle, ChevronRight, FileCheck, AlertCircle } from 'lucide-react';
 import { knowledgeBaseApi } from '../services/api';
 
 interface KnowledgeBaseStatus {
@@ -10,14 +10,17 @@ interface KnowledgeBaseStatus {
   message?: string;
 }
 
+interface Source {
+  content: string;
+  source: string;
+  doc_type: string;
+  relevance_score: number;
+  page?: number;
+}
+
 interface QueryResult {
   answer: string;
-  sources: Array<{
-    content: string;
-    source: string;
-    doc_type: string;
-    relevance_score: number;
-  }>;
+  sources: Source[];
   confidence: number;
   query_time_ms: number;
 }
@@ -117,180 +120,215 @@ export const KnowledgeBaseSearch: React.FC = () => {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-100 rounded-lg">
-            <Brain className="text-purple-600" size={20} />
+          <div className="p-2.5 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg shadow-sm text-white">
+            <Brain size={20} />
           </div>
           <div>
-            <h3 className="font-semibold text-gray-900">Product Knowledge Base</h3>
-            <p className="text-xs text-gray-500">
-              {status?.document_count || 0} documents indexed
-              {status?.ai_enhanced && ' • AI-enhanced'}
-            </p>
+            <h3 className="font-semibold text-gray-900 leading-tight">Technical Knowledge Base</h3>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                SME Engine Active
+              </span>
+              <span className="text-xs text-gray-400">
+                {status?.document_count || 0} docs indexed
+              </span>
+            </div>
           </div>
         </div>
         <button
           onClick={() => setShowUpload(!showUpload)}
-          className="text-sm text-purple-600 hover:text-purple-700 flex items-center gap-1"
+          className="text-sm font-medium text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
         >
           <Upload size={16} />
-          {showUpload ? 'Cancel' : 'Add Document'}
+          {showUpload ? 'Close' : 'Add Catalog'}
         </button>
       </div>
 
       {/* Upload Panel */}
       {showUpload && (
-        <div className="px-5 py-4 bg-purple-50 border-b border-purple-100">
-          <form onSubmit={handleUpload} className="space-y-3">
-            <div className="flex gap-3">
+        <div className="px-6 py-5 bg-orange-50/50 border-b border-orange-100 animate-in slide-in-from-top-2">
+          <form onSubmit={handleUpload} className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
               <select
                 value={uploadDocType}
                 onChange={(e) => setUploadDocType(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                className="px-3 py-2.5 border border-orange-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none"
               >
                 <option value="catalog">Product Catalog</option>
-                <option value="spec_sheet">Spec Sheet</option>
-                <option value="pricing">Pricing Sheet</option>
-                <option value="manual">Manual/Guide</option>
-                <option value="datasheet">Datasheet</option>
+                <option value="spec_sheet">Technical Spec Sheet</option>
+                <option value="pricing">Pricing Matrix</option>
+                <option value="manual">Installation Manual</option>
               </select>
               <input
                 ref={inputRef}
                 type="file"
                 accept=".txt,.md,.pdf"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                className="flex-1 text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-purple-600 file:text-white hover:file:bg-purple-700"
+                className="flex-1 text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-500 file:text-white file:font-medium hover:file:bg-orange-600 transition-colors cursor-pointer"
               />
             </div>
             <div className="flex items-center gap-3">
               <button
                 type="submit"
                 disabled={!uploadFile || uploading}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-700"
+                className="px-5 py-2.5 bg-orange-600 text-white rounded-lg text-sm font-medium shadow-sm hover:shadow hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                {uploading ? 'Uploading...' : 'Upload & Index'}
+                {uploading ? 'Ingesting...' : 'Upload & Index'}
               </button>
               {uploadSuccess && (
-                <span className="text-sm text-green-600 flex items-center gap-1">
+                <span className="text-sm text-green-700 flex items-center gap-1.5 font-medium bg-green-50 px-3 py-1.5 rounded-lg border border-green-200">
                   <CheckCircle size={16} />
-                  Document indexed!
+                  Knowledge successfully integrated
                 </span>
               )}
             </div>
             <p className="text-xs text-gray-500">
-              Note: For PDFs and images, OCR preprocessing required before upload.
+              Note: PDFs are processed securely. Page numbers and technical tables are preserved.
             </p>
           </form>
         </div>
       )}
 
-      {/* Search */}
-      <div className="p-5">
-        <form onSubmit={handleSearch} className="relative">
+      {/* Main Content Area */}
+      <div className="p-6">
+        {/* Search Bar */}
+        <form onSubmit={handleSearch} className="relative max-w-2xl mx-auto mb-8">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Search className="text-gray-400 group-focus-within:text-orange-500 transition-colors" size={20} />
+          </div>
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask about products, specs, pricing... (e.g., 'What's the lead time on XT-400 valves?')"
-            className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            placeholder="Ask a technical question... (e.g., 'What is the specific pressure rating for Nitra cylinders?')"
+            className="w-full pl-11 pr-24 py-3.5 border border-gray-200 rounded-xl bg-gray-50/50 focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all shadow-sm text-gray-900 placeholder:text-gray-400"
           />
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <button
             type="submit"
             disabled={loading || !query.trim()}
-            className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-purple-700"
+            className="absolute right-2 top-1.5 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            {loading ? 'Searching...' : 'Ask'}
+            {loading ? 'Analyzing...' : 'Ask SME'}
           </button>
         </form>
 
-        {/* Results */}
+        {/* Results - Side by Side Layout for Grade A Trust Signal */}
         {result && (
-          <div className="mt-5 space-y-4">
-            {/* Answer */}
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Brain size={16} className="text-purple-600" />
-                <span className="text-sm font-medium text-purple-900">Answer</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  result.confidence >= 0.7 ? 'bg-green-100 text-green-700' :
-                  result.confidence >= 0.4 ? 'bg-amber-100 text-amber-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {Math.round(result.confidence * 100)}% confident
-                </span>
-              </div>
-              <p className="text-gray-800 whitespace-pre-wrap">{result.answer}</p>
-            </div>
+          <div className="grid lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-            {/* Sources */}
-            {result.sources.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                  <FileText size={16} />
-                  Sources ({result.sources.length})
-                </h4>
-                <div className="space-y-2">
-                  {result.sources.map((source, idx) => (
-                    <div key={idx} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-gray-600 capitalize">
-                          {source.doc_type.replace('_', ' ')}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {Math.round(source.relevance_score * 100)}% match
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-700 line-clamp-2">{source.content}</p>
-                      <p className="text-xs text-gray-500 mt-1 truncate">{source.source}</p>
-                    </div>
-                  ))}
+            {/* Left Column: AI Answer */}
+            <div className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm">
+              <div className="flex items-center gap-2.5 mb-4 pb-4 border-b border-gray-100">
+                <Brain size={18} className="text-orange-600" />
+                <h4 className="font-semibold text-gray-900">SME Insight</h4>
+                <div className={`ml-auto text-xs font-semibold px-2.5 py-1 rounded-full border ${result.confidence >= 0.7
+                    ? 'bg-green-50 text-green-700 border-green-200'
+                    : result.confidence >= 0.4
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-red-50 text-red-700 border-red-200'
+                  }`}>
+                  {Math.round(result.confidence * 100)}% Confidence
                 </div>
               </div>
-            )}
 
-            <p className="text-xs text-gray-400 text-right">
-              Query time: {result.query_time_ms}ms
-            </p>
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!result && !loading && status && status.document_count === 0 && (
-          <div className="mt-8 text-center py-8">
-            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <FileText className="text-purple-400" size={32} />
+              <div className="prose prose-sm prose-orange max-w-none">
+                <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+                  {result.answer}
+                </p>
+              </div>
             </div>
-            <h4 className="font-medium text-gray-900">No documents yet</h4>
-            <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
-              Upload product catalogs, spec sheets, or pricing documents to start searching with AI.
-            </p>
-            <button
-              onClick={() => setShowUpload(true)}
-              className="mt-4 text-purple-600 text-sm font-medium hover:text-purple-700"
-            >
-              Upload your first document →
-            </button>
+
+            {/* Right Column: Evidence & Citations */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                  <FileCheck size={16} />
+                  Technical Evidence
+                </h4>
+                <span className="text-xs text-gray-400">
+                  {result.sources.length} sources found
+                </span>
+              </div>
+
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                {result.sources.map((source, idx) => (
+                  <div
+                    key={idx}
+                    className="group bg-white border border-gray-200 rounded-xl p-4 hover:border-orange-300 hover:shadow-md transition-all duration-200"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-blue-50 text-blue-600 rounded">
+                          <FileText size={14} />
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 truncate max-w-[200px]" title={source.source}>
+                          {source.source}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {source.page && (
+                          <span className="text-xs font-mono font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                            Page {source.page}
+                          </span>
+                        )}
+                        {source.relevance_score > 0.7 && (
+                          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">
+                            Match
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="relative pl-3 border-l-2 border-orange-200">
+                      <p className="text-xs text-gray-600 leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all">
+                        {/* Highlight key terms? For now just show text */}
+                        "{source.content}"
+                      </p>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-end">
+                      <button className="text-[10px] font-medium text-orange-600 flex items-center gap-0.5 hover:underline opacity-0 group-hover:opacity-100 transition-opacity">
+                        View Full Spec <ChevronRight size={10} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Example Questions */}
-        {!result && !loading && status && status.document_count > 0 && (
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 mb-2">Try asking:</p>
-            <div className="flex flex-wrap gap-2">
-              {['What is the lead time on XT-400?', 'Do we have stainless steel fittings?', 'What is the price break for 100 units?', 'What are the specs for valve ABC-123?'].map((q) => (
+        {/* Empty State / Suggestions */}
+        {!result && !loading && (
+          <div className="mt-8 text-center pb-6">
+            <div className="inline-flex items-center justify-center p-4 bg-orange-50 rounded-full mb-4">
+              <Brain className="text-orange-400" size={32} />
+            </div>
+            <h4 className="text-lg font-medium text-gray-900">Unlock your Product Data</h4>
+            <p className="text-gray-500 max-w-md mx-auto mt-2 mb-8">
+              The Knowledge Base analyzes your technical documents to answer complex quoting questions instantly.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto">
+              {[
+                'What is the pressure rating for Nitra cylinders?',
+                'Lead time for XT-400 valves?',
+                'Price break for 100 units of SKU ABC?',
+                'Do we have stainless steel fittings in stock?'
+              ].map((q) => (
                 <button
                   key={q}
                   onClick={() => {
                     setQuery(q);
                     inputRef.current?.focus();
                   }}
-                  className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
+                  className="text-left p-3 text-sm text-gray-600 bg-white border border-gray-200 rounded-xl hover:border-orange-300 hover:shadow-sm transition-all"
                 >
+                  <span className="block text-xs font-medium text-orange-600 mb-0.5">Ask SME:</span>
                   {q}
                 </button>
               ))}
@@ -301,3 +339,4 @@ export const KnowledgeBaseSearch: React.FC = () => {
     </div>
   );
 };
+

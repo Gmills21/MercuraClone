@@ -4,6 +4,11 @@ Uses ONLY free tools: SQLite, OpenRouter, local ChromaDB.
 """
 
 from fastapi import FastAPI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -54,6 +59,7 @@ from app.routes import knowledge_base
 from app.routes import billing
 from app.routes import organizations
 from app.routes import data
+from app.routes import ai_service
 
 # Create FastAPI app
 app = FastAPI(
@@ -96,6 +102,7 @@ app.include_router(knowledge_base.router)  # Optional feature
 app.include_router(billing.router)  # B2B subscription management
 app.include_router(organizations.router)  # Organization/team management
 app.include_router(data.router)  # Data/emails endpoints
+app.include_router(ai_service.router)  # AI service management
 
 # Serve frontend static files
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -141,11 +148,22 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     from datetime import datetime
+    from app.ai_provider_service import get_ai_service
+    
+    ai_service = get_ai_service()
+    stats = ai_service.get_stats()
+    
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "database": "sqlite",
-        "ai_provider": "openrouter" if settings.openrouter_api_key else "not_configured"
+        "ai_service": {
+            "status": "configured" if stats["keys"] else "not_configured",
+            "total_keys": len(stats["keys"]),
+            "gemini_keys": len([k for k in stats["keys"] if k["provider"] == "gemini"]),
+            "openrouter_keys": len([k for k in stats["keys"] if k["provider"] == "openrouter"]),
+            "success_rate": stats["success_rate"]
+        }
     }
 
 
@@ -156,10 +174,16 @@ async def startup_event():
     logger.info(f"Environment: {settings.app_env}")
     
     # Check AI configuration
-    if settings.openrouter_api_key:
-        logger.info("OpenRouter API configured")
+    from app.ai_provider_service import get_ai_service
+    ai_service = get_ai_service()
+    stats = ai_service.get_stats()
+    
+    if stats["keys"]:
+        gemini_count = len([k for k in stats["keys"] if k["provider"] == "gemini"])
+        openrouter_count = len([k for k in stats["keys"] if k["provider"] == "openrouter"])
+        logger.info(f"MultiProviderAIService configured: {gemini_count} Gemini keys, {openrouter_count} OpenRouter keys")
     else:
-        logger.warning("OpenRouter API key not set - AI features will be disabled")
+        logger.warning("No AI API keys configured - AI features will be disabled")
     
     # Initialize RAG service
     from app.rag_service import get_rag_service

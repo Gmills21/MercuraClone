@@ -305,4 +305,44 @@ class BusinessImpactService:
         if not recs:
             recs.append("Continue current workflow - metrics look good")
         
-        return recs
+    @classmethod
+    def calculate_roi_simulation(cls,
+                                 requests_per_year: int,
+                                 employees: int,
+                                 manual_time_mins: float,
+                                 avg_value: float) -> Dict[str, Any]:
+        """
+        Calculate simulated ROI based on user inputs.
+        Reflects 'Velocity vs. Efficiency' and 'Money on the Table'.
+        """
+        tool_time_mins = 2.0  # Benchmark
+        
+        # Avoid negative savings
+        if manual_time_mins < tool_time_mins:
+            manual_time_mins = tool_time_mins
+            
+        time_saved_per_quote_mins = manual_time_mins - tool_time_mins
+        
+        # Total hours saved per year
+        total_time_saved_hours = (requests_per_year * time_saved_per_quote_mins) / 60
+        
+        # Potential Savings Calculation
+        # Based on competitor benchmark: 1000 reqs * 58 mins saved -> €18,300
+        # Implies hourly rate of approx $18.93
+        hourly_rate = 18.93 
+        potential_savings = total_time_saved_hours * hourly_rate
+        
+        # Revenue Upside Calculation
+        # Based on competitor benchmark: €1,500 upside on €400,000 Volume (1000 * 400)
+        # Implies 0.375% Pipeline Value Lift from Velocity
+        pipeline_value = requests_per_year * avg_value
+        revenue_upside = pipeline_value * 0.00375
+        
+        return {
+            'potential_savings': round(potential_savings, 2),
+            'revenue_upside': round(revenue_upside, 2),
+            'hours_saved_annually': round(total_time_saved_hours, 1),
+            'pipeline_value': round(pipeline_value, 2),
+            'currency': '$'
+        }
+

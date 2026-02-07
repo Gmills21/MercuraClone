@@ -5,6 +5,7 @@ Serious metrics for serious business owners
 
 from fastapi import APIRouter
 from typing import Optional
+from pydantic import BaseModel
 
 from app.business_impact_service import BusinessImpactService
 
@@ -121,3 +122,22 @@ async def get_impact_dashboard(user_id: str = "test-user"):
         "roi": BusinessImpactService.get_roi_summary(user_id),
         "weekly": BusinessImpactService.get_weekly_report(user_id)
     }
+
+class ROISimulationRequest(BaseModel):
+    requests_per_year: int
+    employees: int
+    manual_time_mins: float
+    avg_value_per_quote: float
+
+@router.post("/simulate")
+async def simulate_roi(request: ROISimulationRequest):
+    """
+    Calculate projected ROI based on simulated inputs.
+    """
+    return BusinessImpactService.calculate_roi_simulation(
+        request.requests_per_year,
+        request.employees,
+        request.manual_time_mins,
+        request.avg_value_per_quote
+    )
+

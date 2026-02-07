@@ -91,6 +91,19 @@ export const statsApi = {
 export const extractionsApi = {
     parse: (data: { text: string; source_type?: string }) => api.post('/extractions/parse', data),
     list: (status?: string) => api.get(`/extractions/${status ? `?status=${status}` : ''}`),
+    // Unified extraction (Text, Image, PDF, Excel)
+    unifiedParse: (data: { text?: string; file?: File; source_type?: string }) => {
+        const formData = new FormData();
+        if (data.text) formData.append('text', data.text);
+        if (data.file) formData.append('file', data.file);
+        if (data.source_type) formData.append('source_type', data.source_type);
+
+        return api.post('/extract/', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+    },
 };
 
 // Knowledge Base API (optional feature)

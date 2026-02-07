@@ -8,6 +8,7 @@ export const SmartQuote = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<'input' | 'review' | 'sending'>('input');
   const [inputText, setInputText] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -16,6 +17,7 @@ export const SmartQuote = () => {
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any>({});
   const [taxRate, setTaxRate] = useState(8.5);
+  const [dragActive, setDragActive] = useState(false);
 
   // Load customers and products on mount
   useEffect(() => {
@@ -35,27 +37,63 @@ export const SmartQuote = () => {
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
   // AI Extraction
   const handleExtract = async () => {
-    if (!inputText.trim()) return;
-    
+    if (!inputText.trim() && !selectedFile) return;
+
     setIsExtracting(true);
     try {
-      const res = await extractionsApi.parse({
-        text: inputText,
-        source_type: 'email',
-      });
-      
+      let res;
+      if (selectedFile) {
+        res = await extractionsApi.unifiedParse({
+          file: selectedFile,
+          source_type: 'document',
+        });
+      } else {
+        res = await extractionsApi.unifiedParse({
+          text: inputText,
+          source_type: 'email',
+        });
+      }
+
       const data = res.data;
       setExtractedData(data);
-      
+
+      // The unified endpoint returns structured_data directly
+      const parsedItems = data.structured_data?.line_items || [];
+
       // Match extracted items to products with intelligence
       const smartItems = await matchItemsIntelligently(
-        data.parsed_data?.line_items || [],
+        parsedItems,
         products,
         selectedCustomer
       );
-      
+
       setLineItems(smartItems);
       setStep('review');
     } catch (error) {
@@ -70,17 +108,17 @@ export const SmartQuote = () => {
   const matchItemsIntelligently = async (items: any[], products: any[], customer: any) => {
     return items.map((item, index) => {
       // Find matching product by name or SKU
-      const matchedProduct = products.find(p => 
+      const matchedProduct = products.find(p =>
         p.name?.toLowerCase().includes(item.item_name?.toLowerCase()) ||
         p.sku?.toLowerCase() === item.sku?.toLowerCase()
       );
 
       const basePrice = matchedProduct?.price || item.unit_price || 0;
       const quantity = item.quantity || 1;
-      
+
       // Generate pricing insights
       const insights = generatePricingInsights(matchedProduct, basePrice, customer);
-      
+
       return {
         id: `item-${index}`,
         extracted_name: item.item_name,
@@ -152,7 +190,7 @@ export const SmartQuote = () => {
     // Apply best suggestion
     if (insights.opportunities.length > 0) {
       // Use the highest suggested price from opportunities
-      const bestOpportunity = insights.opportunities.reduce((best: any, opp: any) => 
+      const bestOpportunity = insights.opportunities.reduce((best: any, opp: any) =>
         opp.suggestedPrice > best.suggestedPrice ? opp : best
       );
       insights.suggestedPrice = bestOpportunity.suggestedPrice;
@@ -163,7 +201,7 @@ export const SmartQuote = () => {
 
   // Update line item price
   const updatePrice = (itemId: string, newPrice: number) => {
-    setLineItems(items => 
+    setLineItems(items =>
       items.map(item => {
         if (item.id === itemId) {
           return {
@@ -188,11 +226,11 @@ export const SmartQuote = () => {
   // Send quote
   const handleSendQuote = async () => {
     if (!selectedCustomer || lineItems.length === 0) return;
-    
+
     setStep('sending');
     try {
       const { subtotal, taxAmount, total } = calculateTotals();
-      
+
       const quoteData = {
         customer_id: selectedCustomer.id,
         items: lineItems.map(item => ({
@@ -206,16 +244,16 @@ export const SmartQuote = () => {
         tax_rate: taxRate,
         notes: `Extracted from: ${inputText.slice(0, 100)}...`,
       };
-      
+
       const res = await quotesApi.create(quoteData);
-      
+
       // Track time saved from using Smart Quote
       try {
         await api.post('/impact/track?action_type=smart_quote');
       } catch (e) {
         // Non-critical, don't block user
       }
-      
+
       // Success! Navigate to quote view
       navigate(`/quotes/${res.data.id}`);
     } catch (error) {
@@ -233,8 +271,8 @@ export const SmartQuote = () => {
       <div className="min-h-screen bg-gray-50">
         <div className="bg-white border-b border-gray-200">
           <div className="max-w-3xl mx-auto px-8 py-6">
-            <h1 className="text-2xl font-semibold text-gray-900">Create Quote</h1>
-            <p className="text-gray-600 mt-1">Paste an RFQ email or describe what your customer needs</p>
+            <h1 className="text-2xl font-semibold text-gray-900">Create Smart Quote</h1>
+            <p className="text-gray-600 mt-1">Upload an RFQ PDF, spreadsheet, or paste the request details below</p>
           </div>
         </div>
 
@@ -263,36 +301,87 @@ export const SmartQuote = () => {
           <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="text-orange-500" size={20} />
-              <h2 className="text-lg font-semibold text-gray-900">AI-Powered Extraction</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Import RFQ Document</h2>
             </div>
-            
-            <p className="text-gray-600 mb-4">
-              Paste an email, RFQ, or just describe what they need. Our AI will extract items and suggest pricing.
+
+            <p className="text-gray-600 mb-6">
+              Upload a PDF, Excel sheet, or technical spec to automatically extract products and quantities.
             </p>
+
+            {/* File Upload Zone */}
+            <div
+              className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer mb-8 ${dragActive ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-orange-300'
+                } ${selectedFile ? 'bg-green-50 border-green-200' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => document.getElementById('file-upload')?.click()}
+            >
+              <input
+                id="file-upload"
+                type="file"
+                className="hidden"
+                onChange={handleFileChange}
+                accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp"
+              />
+
+              {selectedFile ? (
+                <div className="flex flex-col items-center">
+                  <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-3">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <h3 className="font-medium text-gray-900">{selectedFile.name}</h3>
+                  <p className="text-sm text-gray-500 mt-1">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB • Ready for extraction</p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedFile(null);
+                    }}
+                    className="mt-4 text-xs text-red-600 hover:text-red-800 font-medium"
+                  >
+                    Remove File
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center text-gray-500">
+                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <Package size={24} />
+                  </div>
+                  <p className="text-sm">
+                    <span className="font-semibold text-orange-600">Click to upload</span> or drag and drop
+                  </p>
+                  <p className="text-xs mt-1">PDF, XLSX, CSV, or Image (Max 20MB)</p>
+                </div>
+              )}
+            </div>
+
+            <div className="relative flex items-center mb-8">
+              <div className="flex-grow border-t border-gray-200"></div>
+              <span className="flex-shrink mx-4 text-gray-400 text-sm font-medium">OR PASTE TEXT</span>
+              <div className="flex-grow border-t border-gray-200"></div>
+            </div>
 
             <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={`Example:
+              disabled={!!selectedFile}
+              placeholder={selectedFile ? "File selected. Clear it to paste text instead." : `Example:
 "Hi, need a quote for:
 - 25x Industrial Widget Standard (SKU: WIDGET-001)
 - 10x Heavy Duty Gadget (SKU: GADGET-001)
-
-Delivery by March 15th to our Chicago location.
-
-Thanks,
-John from ACME Corp"`}
-              rows={8}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-mono text-sm"
+...`}
+              rows={6}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-mono text-sm mb-4 disabled:bg-gray-50 disabled:opacity-50"
             />
 
-            <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <div className="text-sm text-gray-500">
-                💡 <strong>Tip:</strong> Include quantities, SKUs, and delivery dates for best results
+                💡 <strong>Tip:</strong> AI handles multi-page technical RFQs and Spec Sheets
               </div>
               <button
                 onClick={handleExtract}
-                disabled={!inputText.trim() || !selectedCustomer || isExtracting}
+                disabled={(!inputText.trim() && !selectedFile) || !selectedCustomer || isExtracting}
                 className="inline-flex items-center gap-2 px-6 py-3 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isExtracting ? (
@@ -362,7 +451,7 @@ John from ACME Corp"`}
                 <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                   <h3 className="font-semibold text-gray-900">Line Items</h3>
                 </div>
-                
+
                 <div className="divide-y divide-gray-200">
                   {lineItems.map((item, index) => (
                     <div key={item.id} className="p-6 hover:bg-gray-50">
@@ -378,7 +467,7 @@ John from ACME Corp"`}
                               </span>
                             )}
                           </div>
-                          
+
                           {/* Extracted Info */}
                           <p className="text-sm text-gray-500 mb-3">
                             Extracted: "{item.extracted_name}" × {item.extracted_qty}
@@ -395,7 +484,7 @@ John from ACME Corp"`}
                                 className="w-20 px-2 py-1 border border-gray-300 rounded text-center"
                               />
                             </div>
-                            
+
                             <div className="flex items-center gap-2">
                               <span className="text-sm text-gray-600">Price:</span>
                               <div className="relative">
@@ -425,7 +514,7 @@ John from ACME Corp"`}
                                 {alert.message}
                               </div>
                             ))}
-                            
+
                             {item.insights.opportunities.map((opp: any, i: number) => (
                               <button
                                 key={i}
@@ -437,7 +526,7 @@ John from ACME Corp"`}
                                 <span className="ml-auto text-green-600 font-medium">Apply</span>
                               </button>
                             ))}
-                            
+
                             {item.insights.margin > 0 && (
                               <div className="flex items-center gap-2 text-sm text-gray-600">
                                 <Package size={14} />
@@ -470,13 +559,13 @@ John from ACME Corp"`}
               {/* Quote Summary */}
               <div className="bg-white border border-gray-200 rounded-lg p-6">
                 <h3 className="font-semibold text-gray-900 mb-4">Quote Summary</h3>
-                
+
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Subtotal</span>
                     <span className="font-medium">${subtotal.toFixed(2)}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Tax ({taxRate}%)</span>
                     <div className="flex items-center gap-2">
@@ -489,11 +578,11 @@ John from ACME Corp"`}
                       <span>%</span>
                     </div>
                   </div>
-                  
+
                   <div className="text-right text-sm text-gray-600">
                     ${taxAmount.toFixed(2)}
                   </div>
-                  
+
                   <div className="border-t pt-3 flex justify-between">
                     <span className="font-semibold text-gray-900">Total</span>
                     <span className="text-2xl font-bold text-gray-900">${total.toFixed(2)}</span>
@@ -507,7 +596,7 @@ John from ACME Corp"`}
                     Time Saved
                   </div>
                   <p className="text-sm text-blue-700">
-                    This quote would have taken <strong>18 minutes</strong> manually. 
+                    This quote would have taken <strong>18 minutes</strong> manually.
                     You did it in <strong>2 minutes</strong>.
                   </p>
                 </div>
@@ -522,7 +611,7 @@ John from ACME Corp"`}
                   <Send size={18} />
                   Send Quote to Customer
                 </button>
-                
+
                 <button className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors">
                   Save as Draft
                 </button>

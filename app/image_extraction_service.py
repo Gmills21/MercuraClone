@@ -2,6 +2,7 @@
 Image Extraction Service
 Extract RFQ data from uploaded images (photos of emails, handwritten notes, etc.)
 Uses OCR and AI to convert images to structured quote data
+Uses MultiProviderAIService for intelligent API key rotation
 """
 
 import os
@@ -15,22 +16,15 @@ from PIL import Image
 import pytesseract
 from loguru import logger
 
-# Try to import OpenRouter for AI extraction
-try:
-    from openai import AsyncOpenAI
-    OPENROUTER_AVAILABLE = True
-except ImportError:
-    OPENROUTER_AVAILABLE = False
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+# Import our multi-provider AI service
+from app.ai_provider_service import get_ai_service
 
 
 class ImageExtractionService:
-    """Extract RFQ data from images using OCR + AI."""
+    """Extract RFQ data from images using OCR + MultiProvider AI."""
     
     def __init__(self):
-        from app.deepseek_service import get_deepseek_service
-        self.ai = get_deepseek_service()
+        self.ai_service = get_ai_service()
     
     async def extract_from_image(self, image_data: bytes, filename: str = "image.jpg") -> Dict[str, Any]:
         """
@@ -80,7 +74,7 @@ class ImageExtractionService:
             }
     
     async def _parse_with_ai(self, ocr_text: str) -> Dict[str, Any]:
-        """Use AI to parse structured RFQ data from OCR text."""
+        """Use MultiProvider AI to parse structured RFQ data from OCR text."""
         schema = {
             "customer_name": "string",
             "contact_email": "string",
@@ -101,7 +95,11 @@ class ImageExtractionService:
         
         instructions = "Extract RFQ (Request for Quote) information from this OCR text."
         
-        result = await self.ai.extract_structured_data(ocr_text, schema, instructions)
+        result = await self.ai_service.extract_structured_data(
+            text=ocr_text,
+            schema=schema,
+            instructions=instructions
+        )
         
         if result["success"]:
             return result["data"]

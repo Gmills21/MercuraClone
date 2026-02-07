@@ -1,6 +1,7 @@
 """
 Unified Extraction Engine
 Handles both text and image extraction with consistent AI behavior
+Uses MultiProviderAIService for intelligent API key rotation
 """
 
 from typing import Dict, Any, Optional, List
@@ -31,12 +32,22 @@ except ImportError:
     PYTESSERACT_AVAILABLE = False
     pytesseract = None
 
-# Try to import OpenAI
+# PDF and Office Document support
 try:
-    from openai import AsyncOpenAI
-    OPENAI_AVAILABLE = True
+    import pdfplumber
+    import PyPDF2
+    PDF_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
+    PDF_AVAILABLE = False
+
+try:
+    import pandas as pd
+    EXCEL_AVAILABLE = True
+except ImportError:
+    EXCEL_AVAILABLE = False
+
+# Import our new multi-provider AI service
+from app.ai_provider_service import get_ai_service, extract_structured_data
 
 import os
 
@@ -51,48 +62,15 @@ class ExtractionEngine:
     - Quote mapping
     - Confidence scoring
     
-    Supports DeepSeek OR OpenRouter for AI extraction.
+    Uses MultiProviderAIService for intelligent API key rotation between
+    Gemini and OpenRouter providers.
     """
     
     def __init__(self):
-        self.client = None
-        self.ai_provider = None
-        self.ai_model = None
-        
-        if not OPENAI_AVAILABLE:
-            logger.warning("OpenAI package not available")
-            return
-        
-        # Check for DeepSeek first (preferred), then OpenAI, then OpenRouter
-        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
-        openai_key = os.getenv("OPENAI_API_KEY", "")
-        openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-        
-        logger.info(f"Checking AI keys: deepseek={bool(deepseek_key)}, openai={bool(openai_key)}, openrouter={bool(openrouter_key)}")
-        
-        if deepseek_key:
-            self.client = AsyncOpenAI(
-                base_url="https://api.deepseek.com/v1",
-                api_key=deepseek_key,
-            )
-            self.ai_provider = "deepseek"
-            self.ai_model = "deepseek-chat"
-            logger.info("Extraction engine using DeepSeek AI")
-        elif openai_key:
-            self.client = AsyncOpenAI(
-                api_key=openai_key,
-            )
-            self.ai_provider = "openai"
-            self.ai_model = "gpt-4o-mini"
-            logger.info("Extraction engine using OpenAI")
-        elif openrouter_key:
-            self.client = AsyncOpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=openrouter_key,
-            )
-            self.ai_provider = "openrouter"
-            self.ai_model = "deepseek/deepseek-chat:free"
-            logger.info("Extraction engine using OpenRouter AI")
+        self.ai_service = get_ai_service()
+        self.ai_provider = "multi-provider"
+        self.ai_model = "auto-rotated"
+        logger.info("Extraction engine initialized with MultiProviderAIService")
     
     async def extract_from_text(self, text: str, source_type: str = "email") -> Dict[str, Any]:
         """
@@ -170,7 +148,7 @@ class ExtractionEngine:
                 "success": True,
                 "source": "image",
                 "filename": filename,
-                "ocr_text": ocr_text[:1000],
+                "ocr_text": ocr_text[:2000],
                 "structured_data": cleaned_data,
                 "confidence": confidence * 0.9,  # Slight penalty for OCR
                 "extraction_method": "ocr_then_ai"
@@ -179,28 +157,112 @@ class ExtractionEngine:
         except Exception as e:
             logger.error(f"Image extraction failed: {e}")
             return self._empty_result(f"Extraction failed: {str(e)}")
+
+    async def extract_from_pdf(self, pdf_data: bytes, filename: str = "document.pdf") -> Dict[str, Any]:
+        """Extract RFQ data from PDF document."""
+        logger.info(f"Extracting from PDF: {filename}")
+        
+        if not PDF_AVAILABLE:
+            return self._empty_result("PDF extraction libraries not available")
+            
+        try:
+            full_text = ""
+            
+            # Try pdfplumber first (often better for tables/structured text)
+            try:
+                with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            full_text += page_text + "\n\n"
+            except Exception as e:
+                logger.warning(f"pdfplumber failed: {e}. Falling back to PyPDF2.")
+                
+            # Fallback to PyPDF2 if pdfplumber extracted nothing
+            if not full_text.strip():
+                reader = PyPDF2.PdfReader(io.BytesIO(pdf_data))
+                for page in reader.pages:
+                    full_text += page.extract_text() + "\n\n"
+            
+            if not full_text.strip():
+                return self._empty_result("No text could be extracted from PDF")
+            
+            # AI Parse
+            structured_data = await self._parse_with_ai(full_text, "pdf")
+            cleaned_data = self._clean_extraction(structured_data)
+            confidence = self._calculate_confidence(cleaned_data, has_ocr=False)
+            
+            return {
+                "success": True,
+                "source": "pdf",
+                "filename": filename,
+                "full_text": full_text[:2000],
+                "structured_data": cleaned_data,
+                "confidence": confidence,
+                "extraction_method": "pdf_ai"
+            }
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            return self._empty_result(f"PDF Extraction failed: {str(e)}")
+
+    async def extract_from_xlsx(self, file_data: bytes, filename: str) -> Dict[str, Any]:
+        """Extract RFQ data from Excel/CSV."""
+        logger.info(f"Extracting from Spreadsheet: {filename}")
+        
+        if not EXCEL_AVAILABLE:
+            return self._empty_result("Excel extraction libraries not available")
+            
+        try:
+            # Read first sheet into text representative format
+            if filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(file_data))
+            else:
+                df = pd.read_excel(io.BytesIO(file_data))
+            
+            # Convert to markdown-like string for AI to process
+            csv_text = df.to_csv(index=False)
+            
+            # AI Parse
+            structured_data = await self._parse_with_ai(csv_text, "spreadsheet")
+            cleaned_data = self._clean_extraction(structured_data)
+            confidence = self._calculate_confidence(cleaned_data, has_ocr=False)
+            
+            return {
+                "success": True,
+                "source": "spreadsheet",
+                "filename": filename,
+                "full_text": csv_text[:2000],
+                "structured_data": cleaned_data,
+                "confidence": confidence,
+                "extraction_method": "spreadsheet_ai"
+            }
+        except Exception as e:
+            logger.error(f"Spreadsheet extraction failed: {e}")
+            return self._empty_result(f"Spreadsheet extraction failed: {str(e)}")
     
     async def extract(self, 
                      text: Optional[str] = None,
-                     image_data: Optional[bytes] = None,
+                     file_data: Optional[bytes] = None,
+                     filename: Optional[str] = None,
                      source_type: str = "unknown") -> Dict[str, Any]:
         """
-        Universal extraction method - handles both text and image
-        
-        Args:
-            text: Optional text to extract from
-            image_data: Optional image bytes
-            source_type: Type of source for logging
-        
-        Returns:
-            Structured RFQ data
+        Universal extraction method - handles text, image, PDF, Excel
         """
-        if image_data:
-            return await self.extract_from_image(image_data)
+        if file_data and filename:
+            ext = filename.lower().split('.')[-1]
+            if ext in ['pdf']:
+                return await self.extract_from_pdf(file_data, filename)
+            elif ext in ['xlsx', 'xls', 'csv']:
+                return await self.extract_from_xlsx(file_data, filename)
+            elif ext in ['jpg', 'jpeg', 'png', 'webp']:
+                return await self.extract_from_image(file_data, filename)
+            else:
+                # Fallback to OCR if it's an unrecognized file that might be an image
+                return await self.extract_from_image(file_data, filename)
         elif text:
             return await self.extract_from_text(text, source_type)
         else:
-            return self._empty_result("No text or image provided")
+            return self._empty_result("No text or file provided")
     
     async def _run_ocr(self, image_data: bytes) -> str:
         """Run OCR on image data."""
@@ -225,12 +287,27 @@ class ExtractionEngine:
         return pytesseract.image_to_string(image)
     
     async def _parse_with_ai(self, text: str, source_type: str) -> Dict[str, Any]:
-        """Parse structured data from text using AI."""
-        if not self.client:
-            # Fallback to basic parsing
-            return self._basic_parse(text)
+        """Parse structured data from text using multi-provider AI service."""
         
-        prompt = f"""You are a specialized Procurement AI. Your job is to extract RFQ data ONLY if this is a quote request.
+        schema = {
+            "customer_name": "string - Company/organization name ONLY",
+            "contact_email": "string - Email if found",
+            "contact_phone": "string - Phone if found",
+            "line_items": [
+                {
+                    "item_name": "string - Full product description",
+                    "quantity": "number",
+                    "sku": "string - Product code if found",
+                    "unit": "string - units, pcs, etc"
+                }
+            ],
+            "delivery_date": "string - Requested delivery date",
+            "delivery_location": "string - Delivery address",
+            "special_instructions": "string - Notes about document type",
+            "confidence": "number 0.0-1.0"
+        }
+        
+        instructions = """You are a specialized Procurement AI. Your job is to extract RFQ data ONLY if this is a quote request.
 
 STRICT "ZERO-ERROR" CLASSIFICATION:
 1. FIRST, determine if this is a "Request for Quote" (RFQ) or a "Spec Sheet/Brochure".
@@ -242,56 +319,24 @@ STRICT "ZERO-ERROR" CLASSIFICATION:
    - IGNORE numbered lists (e.g., "1. Feature X" -> This is NOT Quantity 1).
    - IGNORE technical specs (e.g., "150 PSI", "3000 PSI", "Class 300").
    - Quantity must be an EXPLICIT request (e.g., "50 pcs", "Qty 5", "10x").
-   - If a line says "Ball Valve" with NO explicit quantity, check context. If it's a header in a spec sheet, IGNORE IT.
-
-CONTENT:
-{text[:3000]}
-
-Extract in JSON format:
-{{
-    "customer_name": "Company/organization name ONLY",
-    "contact_email": "Email if found",
-    "contact_phone": "Phone if found", 
-    "line_items": [
-        {{
-            "item_name": "Full product description",
-            "quantity": number,
-            "sku": "Product code if found",
-            "unit": "units, pcs, etc"
-        }}
-    ],
-    "delivery_date": "Requested delivery date",
-    "delivery_location": "Delivery address",
-    "special_instructions": "Notes about document type",
-    "confidence": 0.0-1.0
-}}
-
-Return valid JSON only."""
+   - If a line says "Ball Valve" with NO explicit quantity, check context. If it's a header in a spec sheet, IGNORE IT."""
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.ai_model,
-                messages=[
-                    {"role": "system", "content": "You extract structured RFQ data. Return valid JSON only."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=1000
+            result = await extract_structured_data(
+                text=text[:3000],
+                schema=schema,
+                instructions=instructions,
+                preferred_provider=None  # Allow automatic provider selection
             )
             
-            content = response.choices[0].message.content
-            
-            # Extract JSON
-            import json
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
-            
-            return json.loads(content.strip())
-            
+            if result["success"]:
+                return result["data"]
+            else:
+                logger.warning(f"AI extraction failed: {result.get('error')}. Falling back to basic parsing.")
+                return self._basic_parse(text)
+                
         except Exception as e:
-            logger.error(f"AI parsing failed ({self.ai_provider}/{self.ai_model}): {e}")
+            logger.error(f"AI parsing failed: {e}")
             return self._basic_parse(text)
     
     def _basic_parse(self, text: str) -> Dict[str, Any]:

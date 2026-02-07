@@ -1,12 +1,12 @@
-"""
-Unified Extraction Routes
-Single endpoint for all extraction (text, image, email)
-"""
-
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from typing import Optional
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from typing import Optional, Dict, Any
+import os
+import uuid
+from datetime import datetime
 
 from app.services.extraction_engine import extraction_engine
+from app.database_sqlite import save_extraction
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/extract", tags=["extraction"])
 
@@ -15,43 +15,73 @@ router = APIRouter(prefix="/extract", tags=["extraction"])
 async def extract_rfq(
     text: Optional[str] = Form(None),
     source_type: str = Form("unknown"),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    user_org: tuple = Depends(get_current_user_and_org)
 ):
     """
     Universal RFQ extraction endpoint.
     
-    Accepts either:
-    - text: Raw text to parse
-    - file: Image to OCR and parse
-    
-    Returns consistent structured data regardless of source.
+    Accepts text, images, PDFs, and Excel files.
     """
-    # Handle image upload
+    user_id, org_id = user_org
+    
+    # Handle file upload
     if file:
         # Validate file type
-        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-        if file.content_type not in allowed_types:
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.xlsx', '.xls', '.csv']
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        if file_ext not in allowed_extensions:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+                detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
             )
         
-        # Check file size (10MB max)
-        image_data = await file.read()
-        if len(image_data) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Image too large (max 10MB)")
+        # Check file size (20MB max for documents)
+        file_data = await file.read()
+        if len(file_data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 20MB)")
         
-        # Extract from image
-        result = await extraction_engine.extract_from_image(image_data, file.filename)
-        return result
+        # Universal extraction (handles image, pdf, xlsx)
+        result = await extraction_engine.extract(
+            file_data=file_data, 
+            filename=file.filename,
+            source_type=source_type
+        )
     
     # Handle text extraction
     elif text:
         result = await extraction_engine.extract_from_text(text, source_type)
-        return result
     
     else:
         raise HTTPException(status_code=400, detail="Provide either 'text' or 'file'")
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Extraction failed"))
+
+    # Save extraction to database for history/analytics
+    extraction_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    
+    # Map structured data to the shared data format
+    structured_data = result.get("structured_data", {})
+    
+    extraction_data = {
+        "id": extraction_id,
+        "organization_id": org_id,
+        "source_type": source_type if not file else f"file:{file_ext[1:]}",
+        "source_content": text[:1000] if text else f"File: {file.filename}",
+        "parsed_data": structured_data,
+        "confidence_score": result.get("confidence", 0.5),
+        "status": "completed",
+        "created_at": now
+    }
+    
+    save_extraction(extraction_data)
+    
+    # Add extraction_id to response
+    result["id"] = extraction_id
+    return result
 
 
 @router.post("/create-quote")

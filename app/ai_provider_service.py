@@ -1,0 +1,562 @@
+"""
+Multi-Provider AI Service for OpenMercura
+Manages multiple Gemini and OpenRouter API keys with intelligent rotation and fallback.
+Uses API keys from OpenClaw configuration.
+"""
+
+import os
+import json
+import random
+import asyncio
+from typing import Optional, Dict, Any, List, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+import httpx
+from loguru import logger
+
+
+class ProviderType(Enum):
+    GEMINI = "gemini"
+    OPENROUTER = "openrouter"
+
+
+@dataclass
+class APIKey:
+    """Represents a single API key with usage tracking."""
+    key: str
+    provider: ProviderType
+    name: str
+    is_active: bool = True
+    last_used: Optional[datetime] = None
+    request_count: int = 0
+    error_count: int = 0
+    rate_limit_reset: Optional[datetime] = None
+
+
+@dataclass
+class ProviderConfig:
+    """Configuration for an AI provider."""
+    base_url: str
+    default_model: str
+    available_models: List[str]
+    timeout_seconds: float = 60.0
+    max_retries: int = 3
+
+
+# Provider configurations
+GEMINI_CONFIG = ProviderConfig(
+    base_url="https://generativelanguage.googleapis.com/v1beta",
+    default_model="gemini-2.5-flash",
+    available_models=[
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+    ]
+)
+
+OPENROUTER_CONFIG = ProviderConfig(
+    base_url="https://openrouter.ai/api/v1",
+    default_model="deepseek/deepseek-r1",
+    available_models=[
+        "deepseek/deepseek-r1",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-sonnet-4-5",
+        "anthropic/claude-opus-4-5",
+        "meta-llama/llama-3.3-70b-instruct",
+    ]
+)
+
+
+class MultiProviderAIService:
+    """
+    Multi-provider AI service that manages multiple Gemini and OpenRouter API keys.
+    
+    Features:
+    - Automatic API key rotation for load balancing
+    - Intelligent fallback between providers
+    - Rate limit tracking and backoff
+    - Usage statistics per key
+    - Support for both Gemini (Google Generative AI) and OpenRouter APIs
+    """
+    
+    def __init__(self):
+        self.keys: List[APIKey] = []
+        self.current_key_index = 0
+        self._load_keys_from_env()
+        
+        # Statistics
+        self.total_requests = 0
+        self.failed_requests = 0
+        self.last_provider_used: Optional[ProviderType] = None
+        
+        logger.info(f"MultiProviderAIService initialized with {len(self.keys)} API keys")
+        logger.info(f"  - Gemini keys: {len([k for k in self.keys if k.provider == ProviderType.GEMINI])}")
+        logger.info(f"  - OpenRouter keys: {len([k for k in self.keys if k.provider == ProviderType.OPENROUTER])}")
+    
+    def _load_keys_from_env(self):
+        """Load all API keys from environment variables."""
+        # Load Gemini keys (GEMINI_API_KEY and GEMINI_API_KEY_1 through _9)
+        gemini_keys = []
+        
+        # Primary key
+        primary_gemini = os.getenv("GEMINI_API_KEY", "")
+        if primary_gemini:
+            gemini_keys.append(("primary", primary_gemini))
+        
+        # Additional keys
+        for i in range(1, 10):
+            key = os.getenv(f"GEMINI_API_KEY_{i}", "")
+            if key:
+                gemini_keys.append((f"key_{i}", key))
+        
+        for name, key in gemini_keys:
+            self.keys.append(APIKey(
+                key=key,
+                provider=ProviderType.GEMINI,
+                name=f"gemini:{name}"
+            ))
+        
+        # Load OpenRouter keys (OPENROUTER_API_KEY_1 through _9)
+        for i in range(1, 10):
+            key = os.getenv(f"OPENROUTER_API_KEY_{i}", "")
+            if key:
+                self.keys.append(APIKey(
+                    key=key,
+                    provider=ProviderType.OPENROUTER,
+                    name=f"openrouter:key_{i}"
+                ))
+        
+        # Shuffle keys for load balancing
+        random.shuffle(self.keys)
+    
+    def _get_next_key(self, preferred_provider: Optional[ProviderType] = None) -> Optional[APIKey]:
+        """Get the next available API key using round-robin with provider preference."""
+        if not self.keys:
+            return None
+        
+        # Filter active keys not under rate limit
+        now = datetime.now()
+        available_keys = [
+            k for k in self.keys 
+            if k.is_active and (k.rate_limit_reset is None or k.rate_limit_reset < now)
+        ]
+        
+        if not available_keys:
+            logger.warning("All API keys are rate limited or inactive")
+            return None
+        
+        # Prefer specific provider if requested
+        if preferred_provider:
+            provider_keys = [k for k in available_keys if k.provider == preferred_provider]
+            if provider_keys:
+                # Round-robin within provider
+                key = provider_keys[self.current_key_index % len(provider_keys)]
+                self.current_key_index += 1
+                return key
+        
+        # Fall back to any available key
+        key = available_keys[self.current_key_index % len(available_keys)]
+        self.current_key_index += 1
+        return key
+    
+    def _get_provider_config(self, provider: ProviderType) -> ProviderConfig:
+        """Get configuration for a provider."""
+        if provider == ProviderType.GEMINI:
+            return GEMINI_CONFIG
+        return OPENROUTER_CONFIG
+    
+    def _get_headers(self, api_key: APIKey) -> Dict[str, str]:
+        """Get headers for API request."""
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        if api_key.provider == ProviderType.GEMINI:
+            # Gemini uses key in URL, not header
+            pass
+        elif api_key.provider == ProviderType.OPENROUTER:
+            headers["Authorization"] = f"Bearer {api_key.key}"
+            headers["HTTP-Referer"] = "https://openmercura.local"
+            headers["X-Title"] = "OpenMercura"
+        
+        return headers
+    
+    async def _call_gemini(
+        self,
+        api_key: APIKey,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: Optional[int]
+    ) -> Dict[str, Any]:
+        """Call Gemini API."""
+        config = self._get_provider_config(ProviderType.GEMINI)
+        
+        # Convert OpenAI-style messages to Gemini format
+        system_parts = []
+        user_parts = []
+        
+        for msg in messages:
+            if msg["role"] == "system":
+                system_parts.append({"text": msg["content"]})
+            elif msg["role"] == "user":
+                user_parts.append({"text": msg["content"]})
+        
+        # Build Gemini request body
+        contents = []
+        if user_parts:
+            contents.append({"role": "user", "parts": user_parts})
+        
+        body = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens or 2048,
+            }
+        }
+        
+        if system_parts:
+            body["systemInstruction"] = {"parts": system_parts}
+        
+        url = f"{config.base_url}/models/{model}:generateContent?key={api_key.key}"
+        
+        async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+            response = await client.post(
+                url,
+                headers=self._get_headers(api_key),
+                json=body
+            )
+            
+            if response.status_code == 429:
+                # Rate limited
+                api_key.rate_limit_reset = datetime.now() + timedelta(minutes=1)
+                raise RateLimitError(f"Gemini rate limited: {response.text}")
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Convert Gemini response to OpenAI-like format
+            candidates = data.get("candidates", [])
+            if candidates:
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+                text = "".join(p.get("text", "") for p in parts)
+                
+                return {
+                    "choices": [{
+                        "message": {"content": text, "role": "assistant"},
+                        "finish_reason": "stop"
+                    }],
+                    "model": model,
+                    "provider": "gemini"
+                }
+            
+            raise ValueError(f"No candidates in Gemini response: {data}")
+    
+    async def _call_openrouter(
+        self,
+        api_key: APIKey,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: Optional[int]
+    ) -> Dict[str, Any]:
+        """Call OpenRouter API."""
+        config = self._get_provider_config(ProviderType.OPENROUTER)
+        
+        body = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        
+        if max_tokens:
+            body["max_tokens"] = max_tokens
+        
+        url = f"{config.base_url}/chat/completions"
+        
+        async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+            response = await client.post(
+                url,
+                headers=self._get_headers(api_key),
+                json=body
+            )
+            
+            if response.status_code == 429:
+                # Rate limited
+                api_key.rate_limit_reset = datetime.now() + timedelta(minutes=1)
+                raise RateLimitError(f"OpenRouter rate limited: {response.text}")
+            
+            response.raise_for_status()
+            data = response.json()
+            data["provider"] = "openrouter"
+            return data
+    
+    async def chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        model: Optional[str] = None,
+        preferred_provider: Optional[ProviderType] = None,
+        fallback_providers: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Send a chat completion request, trying providers with automatic fallback.
+        
+        Args:
+            messages: List of message dicts with role and content
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            model: Specific model to use (uses default if None)
+            preferred_provider: Try this provider first
+            fallback_providers: Whether to try other providers on failure
+        
+        Returns:
+            Response dict with choices, model, and provider info
+        """
+        self.total_requests += 1
+        
+        # Build provider preference order
+        providers_to_try = []
+        if preferred_provider:
+            providers_to_try.append(preferred_provider)
+        if fallback_providers:
+            for provider in ProviderType:
+                if provider not in providers_to_try:
+                    providers_to_try.append(provider)
+        
+        last_error = None
+        
+        for provider in providers_to_try:
+            config = self._get_provider_config(provider)
+            model_to_use = model or config.default_model
+            
+            # Try up to 3 different keys for this provider
+            for attempt in range(3):
+                api_key = self._get_next_key(provider)
+                if not api_key:
+                    logger.warning(f"No available keys for {provider.value}")
+                    break
+                
+                try:
+                    logger.debug(f"Trying {api_key.name} with {model_to_use}")
+                    
+                    if provider == ProviderType.GEMINI:
+                        result = await self._call_gemini(
+                            api_key, messages, model_to_use, temperature, max_tokens
+                        )
+                    else:
+                        result = await self._call_openrouter(
+                            api_key, messages, model_to_use, temperature, max_tokens
+                        )
+                    
+                    # Success - update stats
+                    api_key.last_used = datetime.now()
+                    api_key.request_count += 1
+                    self.last_provider_used = provider
+                    
+                    logger.info(f"Success with {api_key.name} using {model_to_use}")
+                    return result
+                    
+                except RateLimitError as e:
+                    logger.warning(f"Rate limit hit for {api_key.name}: {e}")
+                    api_key.error_count += 1
+                    last_error = e
+                    # Try next key
+                    
+                except Exception as e:
+                    logger.error(f"Error with {api_key.name}: {e}")
+                    api_key.error_count += 1
+                    last_error = e
+                    # Try next key
+        
+        # All providers failed
+        self.failed_requests += 1
+        error_msg = f"All AI providers failed. Last error: {last_error}"
+        logger.error(error_msg)
+        return {"error": error_msg, "choices": None}
+    
+    async def extract_structured_data(
+        self,
+        text: str,
+        schema: Dict[str, Any],
+        instructions: Optional[str] = None,
+        temperature: float = 0.1,
+        preferred_provider: Optional[ProviderType] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract structured data from unstructured text.
+        
+        Args:
+            text: Raw text to parse
+            schema: JSON schema describing expected output
+            instructions: Additional instructions for the model
+            temperature: Lower temperature for more deterministic extraction
+            preferred_provider: Preferred AI provider
+        
+        Returns:
+            Parsed structured data with success flag
+        """
+        system_prompt = f"""You are a data extraction assistant. Extract structured information from the provided text.
+
+Output Format: Return ONLY valid JSON matching this schema:
+{json.dumps(schema, indent=2)}
+
+{instructions or ''}
+
+Important: Return ONLY the JSON object, no markdown formatting, no explanations."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Extract data from this text:\n\n{text}"},
+        ]
+        
+        result = await self.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=2048,
+            preferred_provider=preferred_provider,
+            fallback_providers=True
+        )
+        
+        if "error" in result:
+            return {"success": False, "error": result["error"]}
+        
+        try:
+            content = result["choices"][0]["message"]["content"]
+            # Clean up potential markdown formatting
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            parsed = json.loads(content)
+            return {
+                "success": True, 
+                "data": parsed,
+                "provider": result.get("provider"),
+                "model": result.get("model")
+            }
+        except (KeyError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to parse extraction result: {e}")
+            return {"success": False, "error": f"Parsing failed: {e}"}
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get usage statistics for all API keys."""
+        return {
+            "total_requests": self.total_requests,
+            "failed_requests": self.failed_requests,
+            "success_rate": 1 - (self.failed_requests / max(1, self.total_requests)),
+            "last_provider_used": self.last_provider_used.value if self.last_provider_used else None,
+            "keys": [
+                {
+                    "name": k.name,
+                    "provider": k.provider.value,
+                    "is_active": k.is_active,
+                    "request_count": k.request_count,
+                    "error_count": k.error_count,
+                    "last_used": k.last_used.isoformat() if k.last_used else None,
+                    "rate_limited_until": k.rate_limit_reset.isoformat() if k.rate_limit_reset else None
+                }
+                for k in self.keys
+            ]
+        }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check health of all providers."""
+        results = {}
+        
+        for provider in ProviderType:
+            config = self._get_provider_config(provider)
+            key = self._get_next_key(provider)
+            
+            if not key:
+                results[provider.value] = {"status": "no_keys", "available": False}
+                continue
+            
+            try:
+                # Quick health check with minimal request
+                messages = [{"role": "user", "content": "Hi"}]
+                
+                if provider == ProviderType.GEMINI:
+                    await self._call_gemini(key, messages, config.default_model, 0.1, 10)
+                else:
+                    await self._call_openrouter(key, messages, config.default_model, 0.1, 10)
+                
+                results[provider.value] = {"status": "healthy", "available": True}
+                
+            except Exception as e:
+                results[provider.value] = {"status": f"error: {str(e)}", "available": False}
+        
+        return results
+
+
+class RateLimitError(Exception):
+    """Raised when an API key hits rate limits."""
+    pass
+
+
+# Singleton instance
+_ai_service: Optional[MultiProviderAIService] = None
+
+
+def get_ai_service() -> MultiProviderAIService:
+    """Get or create the AI service singleton."""
+    global _ai_service
+    if _ai_service is None:
+        _ai_service = MultiProviderAIService()
+    return _ai_service
+
+
+# Convenience functions for common operations
+async def chat_completion(
+    messages: List[Dict[str, str]],
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    model: Optional[str] = None,
+    preferred_provider: Optional[str] = None
+) -> Dict[str, Any]:
+    """Convenience function for chat completion."""
+    service = get_ai_service()
+    provider = None
+    if preferred_provider:
+        try:
+            provider = ProviderType(preferred_provider.lower())
+        except ValueError:
+            pass
+    
+    return await service.chat_completion(
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model=model,
+        preferred_provider=provider
+    )
+
+
+async def extract_structured_data(
+    text: str,
+    schema: Dict[str, Any],
+    instructions: Optional[str] = None,
+    preferred_provider: Optional[str] = None
+) -> Dict[str, Any]:
+    """Convenience function for structured data extraction."""
+    service = get_ai_service()
+    provider = None
+    if preferred_provider:
+        try:
+            provider = ProviderType(preferred_provider.lower())
+        except ValueError:
+            pass
+    
+    return await service.extract_structured_data(
+        text=text,
+        schema=schema,
+        instructions=instructions,
+        preferred_provider=provider
+    )

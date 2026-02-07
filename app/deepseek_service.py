@@ -1,57 +1,43 @@
 """
-DeepSeek service for OpenRouter free tier.
-Replaces paid Gemini API with free DeepSeek via OpenRouter.
+DeepSeek service - NOW USING MultiProviderAIService
+This module is kept for backward compatibility.
+All AI calls are routed through the unified MultiProviderAIService.
 """
 
 import os
 import json
-import httpx
 from typing import Optional, Dict, Any, List
 from loguru import logger
 
-# OpenRouter free tier endpoints
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1"
-# Free tier models (verified available on OpenRouter)
-DEFAULT_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
-
-# Fallback models (all free tier)
-FALLBACK_MODELS = [
-    "nvidia/nemotron-3-nano-30b-a3b:free",
-    "upstage/solar-pro-3:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "arcee-ai/trinity-large-preview:free",
-]
+# Import the new multi-provider service
+from app.ai_provider_service import get_ai_service, MultiProviderAIService
 
 
 class DeepSeekService:
-    """Service for interacting with DeepSeek via OpenRouter or Direct API."""
+    """
+    Service for AI interactions - NOW USING MultiProviderAIService.
+    
+    This class is maintained for backward compatibility.
+    It delegates all operations to the unified MultiProviderAIService
+    which handles intelligent key rotation between Gemini and OpenRouter.
+    """
     
     def __init__(self, openrouter_key: Optional[str] = None, deepseek_key: Optional[str] = None):
-        from app.config import settings
+        """
+        Initialize the service.
         
-        self.openrouter_key = openrouter_key or settings.openrouter_api_key
-        self.openrouter_url = OPENROUTER_API_URL
-        self.openrouter_model = settings.openrouter_model or DEFAULT_MODEL
+        Note: The key parameters are now ignored as we use MultiProviderAIService
+        which loads all keys from environment automatically.
+        """
+        self.ai_service = get_ai_service()
         
-        self.deepseek_key = deepseek_key or settings.deepseek_api_key
-        self.deepseek_url = settings.deepseek_base_url
-        self.deepseek_model = settings.deepseek_model
+        # For backward compatibility logging
+        key_count = len(self.ai_service.keys)
+        gemini_count = len([k for k in self.ai_service.keys if k.provider.value == "gemini"])
+        openrouter_count = len([k for k in self.ai_service.keys if k.provider.value == "openrouter"])
         
-        if not self.openrouter_key and not self.deepseek_key:
-            logger.warning("No AI API keys configured (OpenRouter or DeepSeek). AI features will not work.")
-    
-    def _get_headers(self, api_key: str, is_openrouter: bool = True) -> Dict[str, str]:
-        """Get headers for API requests."""
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        if is_openrouter:
-            headers.update({
-                "HTTP-Referer": "https://openmercura.local",
-                "X-Title": "OpenMercura",
-            })
-        return headers
+        logger.info(f"DeepSeekService initialized (using MultiProviderAIService)")
+        logger.info(f"  Available keys: {key_count} total ({gemini_count} Gemini, {openrouter_count} OpenRouter)")
     
     async def chat_completion(
         self,
@@ -61,74 +47,24 @@ class DeepSeekService:
         model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Send a chat completion request, trying OpenRouter first, then direct DeepSeek.
+        Send a chat completion request via MultiProviderAIService.
+        
+        Args:
+            messages: List of message dicts
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens
+            model: Model to use (provider auto-selected)
+        
+        Returns:
+            API response dict
         """
-        # Try OpenRouter first if configured
-        if self.openrouter_key:
-            logger.info("Attempting chat completion via OpenRouter")
-            res = await self._call_api(
-                url=f"{self.openrouter_url}/chat/completions",
-                api_key=self.openrouter_key,
-                model=model or self.openrouter_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                is_openrouter=True
-            )
-            if "error" not in res:
-                return res
-            logger.warning(f"OpenRouter failed: {res.get('error')}. Falling back to Direct DeepSeek if available.")
-
-        # Fallback to direct DeepSeek
-        if self.deepseek_key:
-            logger.info("Attempting chat completion via Direct DeepSeek")
-            res = await self._call_api(
-                url=f"{self.deepseek_url}/chat/completions",
-                api_key=self.deepseek_key,
-                model=self.deepseek_model, # Use direct model if falling back
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                is_openrouter=False
-            )
-            if "error" not in res:
-                return res
-            logger.error(f"Direct DeepSeek failed: {res.get('error')}")
-            return res
-
-        return {"error": "No AI API keys configured or all providers failed."}
-
-    async def _call_api(
-        self,
-        url: str,
-        api_key: str,
-        model: str,
-        messages: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-        is_openrouter: bool
-    ) -> Dict[str, Any]:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
-            
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    url,
-                    headers=self._get_headers(api_key, is_openrouter),
-                    json=payload,
-                )
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            return {"error": f"HTTP {e.response.status_code}: {e.response.text}"}
-        except Exception as e:
-            return {"error": str(e)}
+        return await self.ai_service.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=model,
+            fallback_providers=True
+        )
     
     async def extract_structured_data(
         self,
@@ -147,42 +83,11 @@ class DeepSeekService:
         Returns:
             Parsed structured data
         """
-        system_prompt = f"""You are a data extraction assistant. Extract structured information from the provided text.
-
-Output Format: Return ONLY valid JSON matching this schema:
-{json.dumps(schema, indent=2)}
-
-{instructions or ''}
-
-Important: Return ONLY the JSON object, no markdown formatting, no explanations."""
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Extract data from this text:\n\n{text}"},
-        ]
-        
-        result = await self.chat_completion(messages, temperature=0.1)
-        
-        if "error" in result:
-            return {"success": False, "error": result["error"]}
-        
-        try:
-            content = result["choices"][0]["message"]["content"]
-            # Clean up potential markdown formatting
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-            
-            parsed = json.loads(content)
-            return {"success": True, "data": parsed}
-        except (KeyError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to parse extraction result: {e}")
-            return {"success": False, "error": f"Parsing failed: {e}"}
+        return await self.ai_service.extract_structured_data(
+            text=text,
+            schema=schema,
+            instructions=instructions
+        )
     
     async def parse_line_items(self, text: str) -> Dict[str, Any]:
         """
@@ -296,6 +201,14 @@ Text Content Preview: {scraped_data.get('text', 'N/A')[:2000]}
             }
         
         return {"error": result.get("error", "Analysis failed"), "url": url}
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get usage statistics from MultiProviderAIService."""
+        return self.ai_service.get_stats()
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check health of all providers."""
+        return await self.ai_service.health_check()
 
 
 # Singleton instance
