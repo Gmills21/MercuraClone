@@ -320,3 +320,5 @@ export const QuoteView = () => {
         </div>
     );
 };
+
+export default QuoteView;

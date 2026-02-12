@@ -103,3 +103,5 @@ export const Security = () => {
         </div>
     );
 };
+
+export default Security;

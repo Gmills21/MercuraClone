@@ -328,3 +328,5 @@ export const CreateQuote = () => {
     </div>
   );
 };
+
+export default CreateQuote;

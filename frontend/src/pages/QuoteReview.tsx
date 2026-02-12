@@ -892,3 +892,5 @@ export const QuoteReview = () => {
         </div>
     );
 };
+
+export default QuoteReview;

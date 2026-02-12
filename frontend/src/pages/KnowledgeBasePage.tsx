@@ -74,3 +74,5 @@ export const KnowledgeBasePage: React.FC = () => {
     </div>
   );
 };
+
+export default KnowledgeBasePage;

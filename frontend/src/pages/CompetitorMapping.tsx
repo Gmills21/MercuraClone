@@ -107,3 +107,5 @@ export const CompetitorMapping = () => {
         </div>
     );
 };
+
+export default CompetitorMapping;

@@ -1,210 +1,209 @@
+@import "tailwindcss";
+
 /* ============================================
    LANDING PAGE SPECIFIC STYLES
    ============================================ */
 
-@layer utilities {
+/* Hero Typography */
+.hero-headline {
+    @apply text-5xl md:text-7xl font-bold tracking-tight;
+    line-height: 1.1;
+}
 
-    /* Hero Typography */
-    .hero-headline {
-        @apply text-5xl md:text-7xl font-bold tracking-tight;
-        line-height: 1.1;
-    }
+.hero-subheadline {
+    @apply text-xl md:text-2xl text-muted-foreground;
+    line-height: 1.5;
+}
 
-    .hero-subheadline {
-        @apply text-xl md:text-2xl text-muted-foreground;
-        line-height: 1.5;
-    }
+/* Section Headers */
+.section-headline {
+    @apply text-3xl md:text-5xl font-bold tracking-tight;
+    line-height: 1.2;
+}
 
-    /* Section Headers */
-    .section-headline {
-        @apply text-3xl md:text-5xl font-bold tracking-tight;
-        line-height: 1.2;
-    }
+.section-subline {
+    @apply text-lg md:text-xl text-muted-foreground max-w-2xl;
+    line-height: 1.6;
+}
 
-    .section-subline {
-        @apply text-lg md:text-xl text-muted-foreground max-w-2xl;
-        line-height: 1.6;
-    }
+/* Body Typography */
+.body-large {
+    @apply text-lg leading-relaxed;
+}
 
-    /* Body Typography */
-    .body-large {
-        @apply text-lg leading-relaxed;
-    }
+.body-small {
+    @apply text-sm text-muted-foreground;
+}
 
-    .body-small {
-        @apply text-sm text-muted-foreground;
-    }
+/* Landing Page Spacing */
+.section-py {
+    @apply py-24 md:py-32;
+}
 
-    /* Landing Page Spacing */
-    .section-py {
-        @apply py-24 md:py-32;
-    }
+.section-px {
+    @apply px-6 md:px-8 lg:px-12;
+}
 
-    .section-px {
-        @apply px-6 md:px-8 lg:px-12;
-    }
+.content-gap {
+    @apply gap-16 md:gap-20;
+}
 
-    .content-gap {
-        @apply gap-16 md:gap-20;
-    }
+.card-padding {
+    @apply p-8 md:p-10;
+}
 
-    .card-padding {
-        @apply p-8 md:p-10;
-    }
+/* Landing Page Container */
+.landing-container {
+    @apply max-w-7xl mx-auto;
+}
 
-    /* Landing Page Container */
-    .landing-container {
-        @apply max-w-7xl mx-auto;
-    }
+/* Feature Grid - 2x2 Bento Layout */
+.feature-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8;
+}
 
-    /* Feature Grid - 2x2 Bento Layout */
-    .feature-grid {
-        @apply grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8;
-    }
+/* Logo Cloud Styling */
+.logo-cloud {
+    @apply flex flex-wrap justify-center items-center gap-8 md:gap-12 grayscale opacity-70 hover:opacity-100 transition-opacity duration-300;
+}
 
-    /* Logo Cloud Styling */
-    .logo-cloud {
-        @apply flex flex-wrap justify-center items-center gap-8 md:gap-12 grayscale opacity-70 hover:opacity-100 transition-opacity duration-300;
-    }
+.logo-cloud img {
+    @apply h-8 md:h-10 w-auto;
+}
 
-    .logo-cloud img {
-        @apply h-8 md:h-10 w-auto;
-    }
+/* CTA Button Variants */
+.cta-primary {
+    @apply bg-primary text-primary-foreground px-8 py-4 rounded-lg font-semibold text-lg hover:opacity-90 transition-all duration-300 hover-lift shadow-soft-lg;
+}
 
-    /* CTA Button Variants */
-    .cta-primary {
-        @apply bg-primary text-primary-foreground px-8 py-4 rounded-lg font-semibold text-lg hover:opacity-90 transition-all duration-300 hover-lift shadow-soft-lg;
-    }
+.cta-secondary {
+    @apply bg-transparent border-2 border-foreground/10 text-foreground px-8 py-4 rounded-lg font-semibold text-lg hover:border-foreground/20 transition-all duration-300 hover-lift;
+}
 
-    .cta-secondary {
-        @apply bg-transparent border-2 border-foreground/10 text-foreground px-8 py-4 rounded-lg font-semibold text-lg hover:border-foreground/20 transition-all duration-300 hover-lift;
-    }
+/* Sticky Header Scroll Effect */
+.header-scrolled {
+    @apply glass shadow-soft-lg;
+}
 
-    /* Sticky Header Scroll Effect */
-    .header-scrolled {
-        @apply glass shadow-soft-lg;
-    }
+/* Trust Badge Styling */
+.trust-badge {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 text-slate-700 text-sm font-medium border-minimal;
+}
 
-    /* Trust Badge Styling */
-    .trust-badge {
-        @apply inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 text-slate-700 text-sm font-medium border-minimal;
-    }
+/* Stats Display */
+.stat-display {
+    @apply text-center;
+}
 
-    /* Stats Display */
-    .stat-display {
-        @apply text-center;
-    }
+.stat-number {
+    @apply text-4xl md:text-5xl font-bold text-primary tracking-tight;
+}
 
-    .stat-number {
-        @apply text-4xl md:text-5xl font-bold text-primary tracking-tight;
-    }
+.stat-label {
+    @apply text-sm md:text-base text-muted-foreground mt-2;
+}
 
-    .stat-label {
-        @apply text-sm md:text-base text-muted-foreground mt-2;
-    }
+/* ROI Calculator Specific */
+.roi-input-group {
+    @apply space-y-4;
+}
 
-    /* ROI Calculator Specific */
-    .roi-input-group {
-        @apply space-y-4;
-    }
+.roi-slider {
+    @apply w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer;
+}
 
-    .roi-slider {
-        @apply w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer;
-    }
+.roi-slider::-webkit-slider-thumb {
+    @apply appearance-none w-5 h-5 bg-primary rounded-full cursor-pointer shadow-soft;
+}
 
-    .roi-slider::-webkit-slider-thumb {
-        @apply appearance-none w-5 h-5 bg-primary rounded-full cursor-pointer shadow-soft;
-    }
+.roi-slider::-moz-range-thumb {
+    @apply w-5 h-5 bg-primary rounded-full cursor-pointer shadow-soft border-0;
+}
 
-    .roi-slider::-moz-range-thumb {
-        @apply w-5 h-5 bg-primary rounded-full cursor-pointer shadow-soft border-0;
-    }
+.roi-result-card {
+    @apply bento-card p-8 text-center;
+}
 
-    .roi-result-card {
-        @apply bento-card p-8 text-center;
-    }
+/* How It Works - Step Cards */
+.step-card {
+    @apply bento-card p-8 text-center space-y-4 hover-lift;
+}
 
-    /* How It Works - Step Cards */
-    .step-card {
-        @apply bento-card p-8 text-center space-y-4 hover-lift;
-    }
+.step-icon {
+    @apply text-5xl mb-4;
+}
 
-    .step-icon {
-        @apply text-5xl mb-4;
-    }
+.step-title {
+    @apply text-xl font-semibold tracking-tight;
+}
 
-    .step-title {
-        @apply text-xl font-semibold tracking-tight;
-    }
+.step-description {
+    @apply text-muted-foreground leading-relaxed;
+}
 
-    .step-description {
-        @apply text-muted-foreground leading-relaxed;
-    }
+/* Founder Story Layout */
+.founder-section {
+    @apply flex flex-col md:flex-row items-center gap-12 md:gap-16;
+}
 
-    /* Founder Story Layout */
-    .founder-section {
-        @apply flex flex-col md:flex-row items-center gap-12 md:gap-16;
-    }
+.founder-photo {
+    @apply w-48 h-48 md:w-64 md:h-64 rounded-2xl object-cover shadow-soft-lg;
+}
 
-    .founder-photo {
-        @apply w-48 h-48 md:w-64 md:h-64 rounded-2xl object-cover shadow-soft-lg;
-    }
+.founder-quote {
+    @apply text-xl md:text-2xl leading-relaxed text-foreground/90 italic;
+}
 
-    .founder-quote {
-        @apply text-xl md:text-2xl leading-relaxed text-foreground/90 italic;
-    }
+/* Case Study Card */
+.case-study-card {
+    @apply bento-card p-10 md:p-12;
+}
 
-    /* Case Study Card */
-    .case-study-card {
-        @apply bento-card p-10 md:p-12;
-    }
+.testimonial-quote {
+    @apply text-2xl md:text-3xl font-semibold tracking-tight mb-8 leading-snug;
+}
 
-    .testimonial-quote {
-        @apply text-2xl md:text-3xl font-semibold tracking-tight mb-8 leading-snug;
-    }
+.testimonial-author {
+    @apply text-sm text-muted-foreground;
+}
 
-    .testimonial-author {
-        @apply text-sm text-muted-foreground;
-    }
+/* Footer Specific */
+.footer-section {
+    @apply space-y-4;
+}
 
-    /* Footer Specific */
-    .footer-section {
-        @apply space-y-4;
-    }
+.footer-heading {
+    @apply text-sm font-semibold text-foreground uppercase tracking-wider mb-4;
+}
 
-    .footer-heading {
-        @apply text-sm font-semibold text-foreground uppercase tracking-wider mb-4;
-    }
+.footer-link {
+    @apply text-muted-foreground hover:text-foreground transition-colors duration-200 text-sm;
+}
 
-    .footer-link {
-        @apply text-muted-foreground hover:text-foreground transition-colors duration-200 text-sm;
-    }
+/* Compliance Badges */
+.compliance-badges {
+    @apply flex flex-wrap justify-center items-center gap-6 md:gap-8;
+}
 
-    /* Compliance Badges */
-    .compliance-badges {
-        @apply flex flex-wrap justify-center items-center gap-6 md:gap-8;
-    }
+.compliance-badge {
+    @apply flex items-center gap-2 text-sm text-muted-foreground;
+}
 
-    .compliance-badge {
-        @apply flex items-center gap-2 text-sm text-muted-foreground;
-    }
+/* Animation Delays for Stagger Effect */
+.delay-100 {
+    animation-delay: 100ms;
+}
 
-    /* Animation Delays for Stagger Effect */
-    .delay-100 {
-        animation-delay: 100ms;
-    }
+.delay-200 {
+    animation-delay: 200ms;
+}
 
-    .delay-200 {
-        animation-delay: 200ms;
-    }
+.delay-300 {
+    animation-delay: 300ms;
+}
 
-    .delay-300 {
-        animation-delay: 300ms;
-    }
-
-    .delay-400 {
-        animation-delay: 400ms;
-    }
+.delay-400 {
+    animation-delay: 400ms;
 }
 
 /* Gradient Overlays for Visual Interest */

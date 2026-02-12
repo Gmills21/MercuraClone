@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, FileText, Users, Package, TrendingUp, Clock, CheckCircle, Sparkles, Zap, BarChart3 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { quotesApi, statsApi } from '../services/api';
+import { queryKeys } from '../lib/queryClient';
+import { DashboardSkeleton } from '../components/SkeletonScreens';
 
 // Bento Grid Stat Card with hover lift effect
 const StatCard = ({ title, value, change, icon: Icon, href, size = 'default' }: any) => (
@@ -106,8 +109,8 @@ const RecentQuotesTable = ({ quotes }: { quotes: any[] }) => (
               </td>
               <td className="px-8 py-5">
                 <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${quote.status === 'accepted' ? 'bg-emerald-50 text-emerald-700' :
-                    quote.status === 'sent' ? 'bg-blue-50 text-blue-700' :
-                      'bg-slate-100 text-slate-700'
+                  quote.status === 'sent' ? 'bg-blue-50 text-blue-700' :
+                    'bg-slate-100 text-slate-700'
                   }`}>
                   {quote.status}
                 </span>
@@ -190,55 +193,36 @@ const MetricsMiniCard = ({ icon: Icon, label, value, trend }: any) => (
 );
 
 export const Dashboard = () => {
-  const [stats, setStats] = useState({
-    totalQuotes: 0,
-    totalCustomers: 0,
-    totalProducts: 0,
-    pendingQuotes: 0,
+  // Cached data fetching - survives route switches
+  const { data: recentQuotes = [], isLoading: quotesLoading } = useQuery({
+    queryKey: queryKeys.quotes.list(),
+    queryFn: async () => {
+      const res = await quotesApi.list(5);
+      return res.data || [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
-  const [recentQuotes, setRecentQuotes] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: queryKeys.stats.dashboard(),
+    queryFn: async () => {
+      const res = await statsApi.get(30);
+      return res.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const loadDashboardData = async () => {
-    try {
-      const [quotesRes, statsRes] = await Promise.all([
-        quotesApi.list(5).catch(() => ({ data: [] })),
-        statsApi.get(30).catch(() => ({ data: { total_quotes: 0, total_customers: 0 } })),
-      ]);
+  const loading = quotesLoading || statsLoading;
 
-      setRecentQuotes(quotesRes.data || []);
-      setStats({
-        totalQuotes: statsRes.data?.total_quotes || 0,
-        totalCustomers: statsRes.data?.total_customers || 0,
-        totalProducts: 0,
-        pendingQuotes: (quotesRes.data || []).filter((q: any) => q.status === 'draft').length,
-      });
-    } catch (error) {
-      console.error('Dashboard load error:', error);
-    } finally {
-      setLoading(false);
-    }
+  const stats = {
+    totalQuotes: statsData?.total_quotes || 0,
+    totalCustomers: statsData?.total_customers || 0,
+    totalProducts: 0,
+    pendingQuotes: recentQuotes.filter((q: any) => q.status === 'draft').length,
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 p-12">
-        <div className="max-w-7xl mx-auto">
-          <div className="animate-pulse space-y-8">
-            <div className="h-8 bg-slate-200 rounded-lg w-1/4"></div>
-            <div className="grid grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-36 bg-slate-200 rounded-xl"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  if (loading && !statsData && recentQuotes.length === 0) {
+    return <DashboardSkeleton />;
   }
 
   return (
