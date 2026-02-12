@@ -3,17 +3,21 @@ Business Impact API Routes
 Serious metrics for serious business owners
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Optional
 from pydantic import BaseModel
 
 from app.business_impact_service import BusinessImpactService
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/impact", tags=["business-impact"])
 
 
 @router.get("/time-summary")
-async def get_time_summary(user_id: str = "test-user", days: int = 30):
+async def get_time_summary(
+    days: int = 30,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get time savings summary.
     
@@ -22,11 +26,14 @@ async def get_time_summary(user_id: str = "test-user", days: int = 30):
     - Breakdown by feature
     - Dollar value of time saved
     """
-    return BusinessImpactService.get_time_summary(user_id, days)
+    user_id, org_id = user_org
+    return BusinessImpactService.get_time_summary(user_id, org_id, days)
 
 
 @router.get("/quote-efficiency")
-async def get_quote_efficiency(user_id: str = "test-user"):
+async def get_quote_efficiency(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get quote efficiency metrics.
     
@@ -36,11 +43,14 @@ async def get_quote_efficiency(user_id: str = "test-user"):
     - Time saved on quoting
     - Revenue metrics
     """
-    return BusinessImpactService.get_quote_efficiency(user_id)
+    _, org_id = user_org
+    return BusinessImpactService.get_quote_efficiency(org_id)
 
 
 @router.get("/follow-up-impact")
-async def get_follow_up_impact(user_id: str = "test-user"):
+async def get_follow_up_impact(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get follow-up alert impact.
     
@@ -49,11 +59,14 @@ async def get_follow_up_impact(user_id: str = "test-user"):
     - Conversion rate after follow-up
     - Revenue attributed to follow-ups
     """
-    return BusinessImpactService.get_follow_up_impact(user_id)
+    _, org_id = user_org
+    return BusinessImpactService.get_follow_up_impact(org_id)
 
 
 @router.get("/roi")
-async def get_roi_summary(user_id: str = "test-user"):
+async def get_roi_summary(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get full ROI calculation.
     
@@ -63,11 +76,14 @@ async def get_roi_summary(user_id: str = "test-user"):
     - ROI percentage
     - Payback period
     """
-    return BusinessImpactService.get_roi_summary(user_id)
+    user_id, org_id = user_org
+    return BusinessImpactService.get_roi_summary(user_id, org_id)
 
 
 @router.get("/weekly-report")
-async def get_weekly_report(user_id: str = "test-user"):
+async def get_weekly_report(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get weekly business impact report.
     
@@ -77,14 +93,15 @@ async def get_weekly_report(user_id: str = "test-user"):
     - ROI
     - Recommendations
     """
-    return BusinessImpactService.get_weekly_report(user_id)
+    user_id, org_id = user_org
+    return BusinessImpactService.get_weekly_report(user_id, org_id)
 
 
 @router.post("/track")
 async def track_time_saved(
     action_type: str,
     context: Optional[str] = "",
-    user_id: str = "test-user"
+    user_org: tuple = Depends(get_current_user_and_org)
 ):
     """
     Track time saved from an action.
@@ -96,6 +113,7 @@ async def track_time_saved(
     - customer_lookup: Finding customer info
     - price_check: Competitive price check
     """
+    user_id, _ = user_org
     impact = BusinessImpactService.record_time_saved(user_id, action_type, context)
     
     if impact:
@@ -110,17 +128,20 @@ async def track_time_saved(
 
 
 @router.get("/dashboard")
-async def get_impact_dashboard(user_id: str = "test-user"):
+async def get_impact_dashboard(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get all impact metrics for dashboard display.
     Combined endpoint for efficiency.
     """
+    user_id, org_id = user_org
     return {
         "time_this_month": BusinessImpactService.get_time_summary(user_id, 30),
-        "quote_efficiency": BusinessImpactService.get_quote_efficiency(user_id),
-        "follow_up": BusinessImpactService.get_follow_up_impact(user_id),
-        "roi": BusinessImpactService.get_roi_summary(user_id),
-        "weekly": BusinessImpactService.get_weekly_report(user_id)
+        "quote_efficiency": BusinessImpactService.get_quote_efficiency(org_id),
+        "follow_up": BusinessImpactService.get_follow_up_impact(org_id),
+        "roi": BusinessImpactService.get_roi_summary(user_id, org_id),
+        "weekly": BusinessImpactService.get_weekly_report(user_id, org_id)
     }
 
 class ROISimulationRequest(BaseModel):

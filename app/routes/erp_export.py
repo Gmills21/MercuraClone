@@ -41,7 +41,7 @@ async def export_single_quote(
     - generic: Universal format (works with any ERP)
     """
     
-    valid_formats = ["sap", "netsuite", "quickbooks", "generic"]
+    valid_formats = ["sap", "netsuite", "quickbooks", "gaeb", "generic"]
     if format not in valid_formats:
         raise HTTPException(status_code=400, detail=f"Invalid format. Use: {valid_formats}")
     
@@ -50,6 +50,17 @@ async def export_single_quote(
     
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
+    
+    # Handle GAEB XML export
+    if format == "gaeb":
+        xml_content = result.get("content", "")
+        filename = f"quote_{quote_id}.x83" # Standard GAEB XML extension
+        
+        return Response(
+            content=xml_content,
+            media_type="application/xml",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     
     # Convert to CSV
     import csv

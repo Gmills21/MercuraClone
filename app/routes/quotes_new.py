@@ -4,16 +4,17 @@ Quotes API routes using local SQLite.
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import uuid
 
 from app.database_sqlite import (
     create_quote, add_quote_item, get_quote_with_items, list_quotes,
-    get_customer_by_id, get_product_by_sku, get_quote_by_token
+    get_customer_by_id, get_product_by_sku, get_quote_by_token, get_inbound_email
 )
 from fastapi import Depends
 from app.middleware.organization import get_current_user_and_org
+from app.posthog_utils import capture_event
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
@@ -31,10 +32,12 @@ class QuoteCreate(BaseModel):
     customer_id: str
     project_id: Optional[str] = None
     assignee_id: Optional[str] = None
+    inbound_email_id: Optional[str] = None
     items: List[QuoteItemCreate]
     tax_rate: float = 0.0
     notes: Optional[str] = None
     expires_days: int = 30
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class QuoteItemResponse(BaseModel):
@@ -68,6 +71,7 @@ class QuoteResponse(BaseModel):
     created_at: str
     updated_at: str
     expires_at: Optional[str]
+    metadata: Optional[Dict[str, Any]] = None
 
 
 @router.post("/", response_model=QuoteResponse)
@@ -110,6 +114,52 @@ async def create_quote_endpoint(
     tax_amount = subtotal * (quote.tax_rate / 100)
     total = subtotal + tax_amount
     
+    # --- Time-to-Quote Calculation ---
+    metadata = quote.metadata or {}
+    start_time = None
+    source_type = 'manual'
+    
+    if quote.inbound_email_id:
+        email = get_inbound_email(quote.inbound_email_id)
+        if email and email.get('received_at'):
+            try:
+                start_time = datetime.fromisoformat(email['received_at'].replace('Z', '+00:00'))
+                source_type = 'email'
+            except Exception as e:
+                print(f"Error parsing email time: {e}")
+
+    elif metadata.get('request_received_at'):
+        try:
+            start_time = datetime.fromisoformat(metadata['request_received_at'].replace('Z', '+00:00'))
+            source_type = 'upload'
+        except Exception:
+            pass
+            
+    if start_time:
+        # Ensure timezone awareness compatibility
+        if start_time.tzinfo:
+            end_time = datetime.now(start_time.tzinfo)
+        else:
+            end_time = datetime.utcnow()
+            
+        duration = (end_time - start_time).total_seconds()
+        metadata['time_to_quote_seconds'] = duration
+        metadata['quote_source'] = source_type
+        
+        # Track in PostHog
+        capture_event(
+            distinct_id=user_id,
+            event_name='quote_created_with_impact',
+            properties={
+                'time_to_quote_seconds': duration,
+                'source': source_type,
+                'quote_amount': total,
+                'organization_id': org_id,
+                'items_count': len(quote.items)
+            },
+            groups={'organization': org_id}
+        )
+
     quote_data = {
         "id": quote_id,
         "organization_id": org_id,
@@ -125,7 +175,8 @@ async def create_quote_endpoint(
         "token": token,
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
-        "expires_at": (now + timedelta(days=quote.expires_days)).isoformat()
+        "expires_at": (now + timedelta(days=quote.expires_days)).isoformat(),
+        "metadata": metadata
     }
     
     # Save quote and items

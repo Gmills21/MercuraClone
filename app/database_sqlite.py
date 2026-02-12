@@ -136,12 +136,23 @@ def init_db():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 expires_at TEXT,
+                metadata TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers (id),
                 FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE SET NULL,
                 FOREIGN KEY (assigned_user_id) REFERENCES users (id) ON DELETE SET NULL,
                 FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
             )
         """)
+        
+        # Migration: Ensure quotes table has metadata column
+        cursor.execute("PRAGMA table_info(quotes)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if "metadata" not in columns:
+            try:
+                cursor.execute("ALTER TABLE quotes ADD COLUMN metadata TEXT")
+                logger.info("Migrated quotes table: added metadata column")
+            except Exception as e:
+                logger.error(f"Failed to migrate quotes table: {e}")
         
         # Quote items table
         cursor.execute("""
@@ -596,7 +607,9 @@ def get_quote_with_items(quote_id: str, organization_id: Optional[str] = None) -
         if not row:
             return None
         
+        
         quote = dict(row)
+        quote["metadata"] = json.loads(quote.get("metadata") or "{}")
         
         # Get items
         cursor.execute("SELECT * FROM quote_items WHERE quote_id = ?", (quote_id,))
@@ -611,8 +624,8 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO quotes (id, organization_id, customer_id, project_id, assigned_user_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO quotes (id, organization_id, customer_id, project_id, assigned_user_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote["id"],
                 quote["organization_id"],
@@ -628,7 +641,8 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 quote["token"],
                 quote["created_at"],
                 quote["updated_at"],
-                quote.get("expires_at")
+                quote.get("expires_at"),
+                json.dumps(quote.get("metadata", {}))
             ))
             conn.commit()
             # Return the created quote
@@ -676,7 +690,12 @@ def list_quotes(organization_id: str, limit: int = 100, offset: int = 0) -> List
             ORDER BY q.created_at DESC
             LIMIT ? OFFSET ?
         """, (organization_id, limit, offset))
-        return [dict(row) for row in cursor.fetchall()]
+        results = []
+        for row in cursor.fetchall():
+            res = dict(row)
+            res["metadata"] = json.loads(res.get("metadata") or "{}")
+            results.append(res)
+        return results
 
 
 def update_quote(quote_id: str, updates: Dict[str, Any], organization_id: str) -> bool:
@@ -689,6 +708,9 @@ def update_quote(quote_id: str, updates: Dict[str, Any], organization_id: str) -
         if k in allowed_fields:
             set_parts.append(f"{k} = ?")
             values.append(v)
+        elif k == "metadata":
+            set_parts.append("metadata = ?")
+            values.append(json.dumps(v))
     
     if not set_parts:
         return False
@@ -1035,6 +1057,18 @@ def get_email_by_message_id(message_id: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM inbound_emails WHERE message_id = ?", (message_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+def get_inbound_email(email_id: str) -> Optional[Dict[str, Any]]:
+    """Get email by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM inbound_emails WHERE id = ?", (email_id,))
         row = cursor.fetchone()
         if row:
             data = dict(row)

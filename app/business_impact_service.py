@@ -89,36 +89,56 @@ class BusinessImpactService:
         return impact
     
     @classmethod
-    def get_time_summary(cls, user_id: str, days: int = 30) -> Dict[str, Any]:
+    def get_time_summary(cls, user_id: str, organization_id: str, days: int = 30) -> Dict[str, Any]:
         """Get time savings summary for period."""
         impacts = cls._impacts.get(user_id, [])
         cutoff = datetime.now() - timedelta(days=days)
         
         recent_impacts = [i for i in impacts if i.created_at > cutoff]
         
-        # Total time saved
-        total_minutes = sum(i.time_saved_minutes for i in recent_impacts)
-        total_hours = total_minutes / 60
+        # Calculate time (manual)
+        manual_minutes = sum(i.time_saved_minutes for i in recent_impacts)
+        
+        # Add Quote Time Savings from DB
+        try:
+            quote_eff = cls.get_quote_efficiency(organization_id)
+            quote_hours = quote_eff.get('time_saved_hours', 0)
+            quote_minutes = quote_hours * 60
+            manual_minutes += quote_minutes
+        except Exception:
+            quote_minutes = 0
+            
+        total_hours = manual_minutes / 60
         
         # By action type
         by_action = {}
         for action_type, benchmark in cls.TIME_BENCHMARKS.items():
-            action_impacts = [i for i in recent_impacts if i.action == action_type]
-            action_minutes = sum(i.time_saved_minutes for i in action_impacts)
+            if action_type == 'smart_quote':
+                minutes = quote_minutes
+                count = quote_eff.get('total_quotes_created', 0)
+            else:
+                action_impacts = [i for i in recent_impacts if i.action == action_type]
+                minutes = sum(i.time_saved_minutes for i in action_impacts)
+                count = len(action_impacts)
+            
             by_action[action_type] = {
-                'count': len(action_impacts),
-                'minutes_saved': action_minutes,
-                'hours_saved': action_minutes / 60,
+                'count': count,
+                'minutes_saved': minutes,
+                'hours_saved': minutes / 60,
                 'description': benchmark['description']
             }
         
         # Daily average
         days_with_activity = len(set(i.created_at.date() for i in recent_impacts))
+        # If we have quotes, assume activity every day or at least count quote days if we queried them
+        # Simplify: max(days_with_activity, 1) or assume consistent if quotes exist
         daily_avg = total_hours / max(days_with_activity, 1)
         
         return {
             'period_days': days,
-            'total_minutes_saved': total_minutes,
+        return {
+            'period_days': days,
+            'total_minutes_saved': manual_minutes,
             'total_hours_saved': round(total_hours, 1),
             'daily_average_hours': round(daily_avg, 2),
             'actions_tracked': len(recent_impacts),
@@ -129,12 +149,12 @@ class BusinessImpactService:
         }
     
     @classmethod
-    def get_quote_efficiency(cls, user_id: str) -> Dict[str, Any]:
+    def get_quote_efficiency(cls, organization_id: str) -> Dict[str, Any]:
         """
         Calculate quote efficiency metrics.
         How fast are quotes being created and won?
         """
-        quotes = list_quotes(limit=100)
+        quotes = list_quotes(organization_id=organization_id, limit=100)
         
         if not quotes:
             return {
@@ -146,12 +166,36 @@ class BusinessImpactService:
         
         # Estimate time saved on quotes created
         total_quotes = len(quotes)
-        time_per_quote_manual = cls.MANUAL_QUOTE_TIME_MINS
-        time_per_quote_tool = cls.SMART_QUOTE_TIME_MINS
+        time_per_quote_manual_seconds = cls.MANUAL_QUOTE_TIME_MINS * 60
+        time_per_quote_tool_seconds = cls.SMART_QUOTE_TIME_MINS * 60
         
-        total_manual_time = (total_quotes * time_per_quote_manual) / 60  # hours
-        total_tool_time = (total_quotes * time_per_quote_tool) / 60      # hours
-        time_saved = total_manual_time - total_tool_time
+        total_manual_time_seconds = total_quotes * time_per_quote_manual_seconds
+        total_tool_time_seconds = 0
+        
+        # Calculate actual tool time using metadata if available
+        for q in quotes:
+            metadata = q.get('metadata', {})
+            # Handle if metadata is string (JSON) or dict depending on how list_quotes returns it
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    metadata = {}
+            
+            actual_seconds = metadata.get('time_to_quote_seconds')
+            if actual_seconds:
+                total_tool_time_seconds += float(actual_seconds)
+            else:
+                total_tool_time_seconds += time_per_quote_tool_seconds
+
+        time_saved_seconds = total_manual_time_seconds - total_tool_time_seconds
+        # Prevent negative savings if tool usage was weirdly long
+        if time_saved_seconds < 0:
+            time_saved_seconds = 0
+            
+        time_saved_hours = time_saved_seconds / 3600
+        total_manual_time_hours = total_manual_time_seconds / 3600
         
         # Win rate
         accepted = len([q for q in quotes if q.get('status') == 'accepted'])
@@ -167,14 +211,20 @@ class BusinessImpactService:
             'win_rate_percent': round(win_rate, 1),
             'total_revenue': round(total_value, 2),
             'average_quote_value': round(avg_quote_value, 2),
-            'time_saved_hours': round(time_saved, 1),
-            'manual_time_equivalent_hours': round(total_manual_time, 1),
-            'efficiency_gain_percent': round((time_per_quote_manual - time_per_quote_tool) / time_per_quote_manual * 100),
-            'estimated_monthly_time_savings': f'{round(time_saved, 1)} hours'
+        return {
+            'total_quotes_created': total_quotes,
+            'quotes_accepted': accepted,
+            'win_rate_percent': round(win_rate, 1),
+            'total_revenue': round(total_value, 2),
+            'average_quote_value': round(avg_quote_value, 2),
+            'time_saved_hours': round(time_saved_hours, 1),
+            'manual_time_equivalent_hours': round(total_manual_time_hours, 1),
+            'efficiency_gain_percent': round((time_per_quote_manual_seconds - (total_tool_time_seconds / max(1, total_quotes))) / time_per_quote_manual_seconds * 100),
+            'estimated_monthly_time_savings': f'{round(time_saved_hours, 1)} hours'
         }
     
     @classmethod
-    def get_follow_up_impact(cls, user_id: str) -> Dict[str, Any]:
+    def get_follow_up_impact(cls, organization_id: str) -> Dict[str, Any]:
         """
         Calculate impact of follow-up alerts on win rate.
         """
@@ -184,7 +234,7 @@ class BusinessImpactService:
         # This is a simplified version - in production you'd track which quotes
         # had follow-up alerts acted upon
         
-        quotes = list_quotes(limit=200)
+        quotes = list_quotes(organization_id=organization_id, limit=200)
         sent_quotes = [q for q in quotes if q.get('status') in ['sent', 'accepted', 'rejected']]
         
         if not sent_quotes:
@@ -222,14 +272,14 @@ class BusinessImpactService:
         }
     
     @classmethod
-    def get_roi_summary(cls, user_id: str) -> Dict[str, Any]:
+    def get_roi_summary(cls, user_id: str, organization_id: str) -> Dict[str, Any]:
         """
         Full ROI calculation for the business.
         What are they paying vs what are they getting?
         """
-        time_summary = cls.get_time_summary(user_id, days=30)
-        quote_eff = cls.get_quote_efficiency(user_id)
-        follow_up = cls.get_follow_up_impact(user_id)
+        time_summary = cls.get_time_summary(user_id, organization_id, days=30)
+        quote_eff = cls.get_quote_efficiency(organization_id)
+        follow_up = cls.get_follow_up_impact(organization_id)
         
         # Monthly subscription cost (example)
         monthly_cost = 99  # $99/month for Pro plan
@@ -253,14 +303,18 @@ class BusinessImpactService:
         }
     
     @classmethod
-    def get_weekly_report(cls, user_id: str) -> Dict[str, Any]:
+    def get_weekly_report(cls, user_id: str, organization_id: str) -> Dict[str, Any]:
         """
         Generate weekly business impact report.
         """
-        time_7d = cls.get_time_summary(user_id, days=7)
-        time_30d = cls.get_time_summary(user_id, days=30)
-        quote_eff = cls.get_quote_efficiency(user_id)
-        roi = cls.get_roi_summary(user_id)
+        time_7d = cls.get_time_summary(user_id, organization_id, days=7)
+        time_30d = cls.get_time_summary(user_id, organization_id, days=30)
+        quote_eff = cls.get_quote_efficiency(organization_id)
+        
+        # Calculate ROI using org-based metrics
+        # For this we need to update get_roi_summary too or inline it
+        # Let's update get_roi_summary to accept organization_id
+        roi = cls.get_roi_summary(user_id, organization_id)
         
         return {
             'report_period': 'Last 7 Days',

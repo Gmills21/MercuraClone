@@ -167,3 +167,10 @@ export const organizationsApi = {
     getMe: () => api.get('/organizations/me'),
     getMembers: (orgId: string) => api.get(`/organizations/${orgId}/members`),
 };
+
+export const erpApi = {
+    exportQuote: (quoteId: string, format: string) =>
+        api.post(`/export/quote/${quoteId}/send?format=${format}`),
+    downloadQuote: (quoteId: string, format: string) =>
+        api.get(`/export/quote/${quoteId}?format=${format}`, { responseType: 'blob' }),
+};

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { quotesApi, productsApi, quotesApiExtended, quickbooksApi } from '../services/api';
+import { quotesApi, productsApi, quotesApiExtended, erpApi, quickbooksApi } from '../services/api';
 import { SmartEditor } from '../components/ui/SmartEditor';
-import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
+import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles, RefreshCw, UploadCloud, Download } from 'lucide-react';
 import { trackEvent } from '../posthog';
 
 export const QuoteReview = () => {
@@ -13,6 +13,8 @@ export const QuoteReview = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [syncingQB, setSyncingQB] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [showExportMenu, setShowExportMenu] = useState(false);
     const [hasBeenEdited, setHasBeenEdited] = useState(false);
 
     // Suggestions state
@@ -228,6 +230,22 @@ export const QuoteReview = () => {
         alert("Quote copied to clipboard in ERP-ready Tab-Separated format!");
     };
 
+    const handleExport = async (format: string) => {
+        if (!id) return;
+        setExporting(true);
+        setShowExportMenu(false);
+        try {
+            await erpApi.exportQuote(id, format);
+            alert(`Successfully sent quote to ERP (${format}) via Legacy Bridge!`);
+            trackEvent('erp_export', { format, quote_id: id });
+        } catch (error) {
+            console.error('Export failed:', error);
+            alert('Failed to send to ERP. Please try again.');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     const generateQuoteLink = async () => {
         if (!id) return;
 
@@ -369,15 +387,55 @@ export const QuoteReview = () => {
                     )}
 
                     {quote.status === 'approved' ? (
-                        <button
-                            onClick={handleSyncToQuickBooks}
-                            disabled={syncingQB}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-[#2CA01C] text-white font-medium rounded-lg hover:bg-[#238116] transition-all shadow-md active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
-                            title="Sync valid quote to QuickBooks"
-                        >
-                            {syncingQB ? <RefreshCw className="animate-spin" size={18} /> : <CheckCircle size={18} />}
-                            Sync to QuickBooks
-                        </button>
+                        <>
+                            <div className="relative">
+                                <button
+                                    onClick={() => setShowExportMenu(!showExportMenu)}
+                                    disabled={exporting}
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-500 transition-all shadow-md active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                                    title="Send to ERP System (Legacy Bridge)"
+                                >
+                                    {exporting ? <RefreshCw className="animate-spin" size={18} /> : <UploadCloud size={18} />}
+                                    Export to ERP
+                                </button>
+
+                                {showExportMenu && (
+                                    <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in-up">
+                                        <div className="p-2 border-b border-slate-700/50 text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                                            Select Format
+                                        </div>
+                                        <div className="flex flex-col p-1">
+                                            {[
+                                                { id: 'generic', label: 'Universal CSV' },
+                                                { id: 'sap', label: 'SAP ERP' },
+                                                { id: 'netsuite', label: 'NetSuite' },
+                                                { id: 'quickbooks', label: 'QuickBooks CSV' },
+                                                { id: 'gaeb', label: 'GAEB (European)' }
+                                            ].map((fmt) => (
+                                                <button
+                                                    key={fmt.id}
+                                                    onClick={() => handleExport(fmt.id)}
+                                                    className="text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/50 hover:text-white rounded-lg transition-colors flex items-center justify-between group"
+                                                >
+                                                    {fmt.label}
+                                                    {fmt.id === 'gaeb' && <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">XML</span>}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={handleSyncToQuickBooks}
+                                disabled={syncingQB}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-[#2CA01C] text-white font-medium rounded-lg hover:bg-[#238116] transition-all shadow-md active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                                title="Sync valid quote to QuickBooks (API)"
+                            >
+                                {syncingQB ? <RefreshCw className="animate-spin" size={18} /> : <CheckCircle size={18} />}
+                                Sync to QB
+                            </button>
+                        </>
                     ) : (
                         <>
                             <button
@@ -385,7 +443,7 @@ export const QuoteReview = () => {
                                 className="btn-secondary flex items-center gap-2"
                                 title="Copy to clipboard for ERP paste"
                             >
-                                <Copy size={18} /> Copy for ERP
+                                <Copy size={18} /> Copy Data
                             </button>
                             <button
                                 onClick={generateQuoteLink}

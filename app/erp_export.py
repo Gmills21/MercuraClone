@@ -14,7 +14,7 @@ class ERPExporter:
     """Export quotes/orders to various ERP formats."""
     
     def __init__(self):
-        self.supported_formats = ["sap", "netsuite", "quickbooks", "generic"]
+        self.supported_formats = ["sap", "netsuite", "quickbooks", "gaeb", "generic"]
     
     def export_quote(self, quote_id: str, format_type: str = "generic") -> Dict[str, Any]:
         """Export a single quote to ERP format."""
@@ -30,6 +30,8 @@ class ERPExporter:
             return self._format_netsuite(quote, customer)
         elif format_type == "quickbooks":
             return self._format_quickbooks(quote, customer)
+        elif format_type == "gaeb":
+            return self._format_gaeb(quote, customer)
         else:
             return self._format_generic(quote, customer)
     
@@ -117,6 +119,29 @@ class ERPExporter:
             "Tax_Amount": quote.get("tax_amount", 0),
             "Total": quote.get("total", 0),
             "Message_on_Estimate": quote.get("notes", ""),
+        }
+
+    def _format_gaeb(self, quote: Dict, customer: Optional[Dict]) -> Dict[str, Any]:
+        """Format for GAEB (European Standard). generates an XML string."""
+        from app.services.langextract.docling_parser import DoclingParser
+        
+        items = quote.get("items", [])
+        parser = DoclingParser()
+        
+        # Metadata for GAEB header
+        metadata = {
+            "project_name": quote.get("project_name", f"Quote {quote.get('quote_number', '')}"),
+            "customer_name": customer.get("name", "") if customer else ""
+        }
+        
+        xml_content = parser.format_to_gaeb_xml(items, metadata)
+        
+        return {
+            "format": "gaeb",
+            "file_type": "xml", 
+            "content": xml_content,
+            "quote_number": quote.get("quote_number", ""),
+            "customer": customer.get("name", "") if customer else ""
         }
     
     def _format_generic(self, quote: Dict, customer: Optional[Dict]) -> Dict[str, Any]:
