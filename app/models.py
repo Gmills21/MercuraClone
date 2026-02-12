@@ -171,6 +171,18 @@ class Customer(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class Project(BaseModel):
+    """Project model for grouping quotes."""
+    id: Optional[str] = None
+    organization_id: str
+    name: str
+    address: Optional[str] = None
+    status: str = "active"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Optional[Dict[str, Any]] = None
+
+
 class QuoteItem(BaseModel):
     """Item within a quote."""
     id: Optional[str] = None
@@ -190,12 +202,15 @@ class Quote(BaseModel):
     """Quote/Estimate model."""
     id: Optional[str] = None
     user_id: str
+    organization_id: Optional[str] = None
     customer_id: Optional[str] = None
+    project_id: Optional[str] = None
     inbound_email_id: Optional[str] = None
     quote_number: str
     status: QuoteStatus = QuoteStatus.DRAFT
     total_amount: float = 0.0
     valid_until: Optional[datetime] = None
+    assignee_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     items: List[QuoteItem] = []
@@ -297,6 +312,8 @@ CREATE TABLE IF NOT EXISTS quotes (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
     inbound_email_id UUID REFERENCES inbound_emails(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
     quote_number TEXT NOT NULL,
     status TEXT DEFAULT 'draft',
     total_amount NUMERIC(10, 2) DEFAULT 0.00,

@@ -224,7 +224,7 @@ export const TodayView = () => {
           >
             <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
             <Sparkles size={18} className="group-hover:rotate-12 transition-transform relative z-10" />
-            <span className="relative z-10">Create New Quote</span>
+            <span className="relative z-10">New Request</span>
           </button>
         </div>
       </div>
@@ -306,44 +306,44 @@ export const TodayView = () => {
           </div>
         </div>
 
-        {/* 4. Priorities List (Tall Vertical) */}
-        <div className="col-span-1 lg:col-span-1 row-span-2 bg-zinc-900 text-white rounded-2xl p-6 shadow-2xl flex flex-col relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/20 blur-[50px] rounded-full pointer-events-none" />
+        {/* 4. Priorities List (Tall Vertical) - Now with white/orange theme */}
+        <div className="col-span-1 lg:col-span-1 row-span-2 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-100 rounded-2xl p-6 shadow-sm flex flex-col relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-orange-200/30 blur-[50px] rounded-full pointer-events-none" />
 
           <div className="flex items-center gap-2 mb-6 relative z-10">
-            <Zap size={18} className="text-yellow-400 fill-yellow-400" />
-            <h3 className="font-semibold tracking-wide">AI Priorities</h3>
+            <Zap size={18} className="text-orange-600 fill-orange-500" />
+            <h3 className="font-semibold text-gray-900 tracking-wide">AI Priorities</h3>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto pr-1 custom-scrollbar relative z-10">
             {priorityTasks.length === 0 ? (
-              <div className="text-center py-10 text-zinc-500 text-sm">
-                <ShieldCheck size={32} className="mx-auto mb-2 opacity-50" />
-                All caught up!
+              <div className="text-center py-10 text-gray-500 text-sm">
+                <ShieldCheck size={32} className="mx-auto mb-2 text-green-500 opacity-70" />
+                <span className="font-medium text-gray-600">All caught up!</span>
               </div>
             ) : (
               priorityTasks.map(task => (
                 <div
                   key={task.id}
-                  className="p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer group"
+                  className="p-3.5 rounded-xl bg-white border border-orange-100 hover:border-orange-200 shadow-sm hover:shadow-md transition-all cursor-pointer group"
                   onClick={() => task.actionLink && navigate(task.actionLink)}
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${task.priority === 'high' ? 'bg-red-500/20 text-red-300 border border-red-500/20' : 'bg-blue-500/20 text-blue-300 border border-blue-500/20'
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${task.priority === 'high' ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-blue-100 text-blue-600 border border-blue-200'
                       }`}>
                       {task.priority}
                     </span>
-                    <span className="text-[10px] text-zinc-500 font-medium">{task.time}</span>
+                    <span className="text-[10px] text-gray-500 font-medium">{task.time}</span>
                   </div>
-                  <h4 className="font-medium text-sm text-zinc-100 mb-1 group-hover:text-orange-300 transition-colors">{task.title}</h4>
-                  <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">{task.description}</p>
+                  <h4 className="font-medium text-sm text-gray-900 mb-1 group-hover:text-orange-600 transition-colors">{task.title}</h4>
+                  <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{task.description}</p>
                 </div>
               ))
             )}
           </div>
 
-          <button onClick={() => navigate('/intelligence')} className="mt-4 w-full py-3 bg-white/10 hover:bg-white/15 border border-white/5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 relative z-10 backdrop-blur-sm group">
-            <Sparkles size={16} className="text-orange-300 group-hover:text-orange-200" />
+          <button onClick={() => navigate('/intelligence')} className="mt-4 w-full py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 relative z-10 shadow-md shadow-orange-200/50 group">
+            <Sparkles size={16} className="group-hover:rotate-12 transition-transform" />
             Ask Intelligence
           </button>
         </div>
@@ -387,12 +387,12 @@ export const TodayView = () => {
                       </td>
                       <td className="py-4 px-8">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${quote.status === 'sent' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                            quote.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
-                              'bg-gray-100 text-gray-600 border-gray-200'
+                          quote.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                            'bg-gray-100 text-gray-600 border-gray-200'
                           }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${quote.status === 'sent' ? 'bg-blue-500' :
-                              quote.status === 'approved' ? 'bg-green-500' :
-                                'bg-gray-500'
+                            quote.status === 'approved' ? 'bg-green-500' :
+                              'bg-gray-500'
                             }`}></span>
                           {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
                         </span>

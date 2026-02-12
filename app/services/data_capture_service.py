@@ -20,9 +20,21 @@ class DataCaptureService:
     """Service for capturing and structuring data from unstructured text."""
     
     def __init__(self):
-        self.api_key = settings.openrouter_api_key or settings.deepseek_api_key
+        self.api_keys = settings.all_openrouter_api_keys
+        self.current_key_index = 0
+        self.api_key = self.api_keys[0] if self.api_keys else (settings.openrouter_api_key or settings.deepseek_api_key)
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = settings.llm_model or "deepseek/deepseek-chat"
+        self.model = getattr(settings, "openrouter_model", "deepseek/deepseek-chat")
+    
+    def _rotate_key(self) -> bool:
+        """Rotate to the next available API key. Returns True if successful."""
+        if not self.api_keys or len(self.api_keys) <= 1:
+            return False
+        
+        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        self.api_key = self.api_keys[self.current_key_index]
+        logger.info(f"Rotating OpenRouter API key (Index: {self.current_key_index})")
+        return True
         
     def _build_extraction_prompt(self, text: str, schema: Dict[str, Any]) -> str:
         """Build the prompt for data extraction."""
@@ -92,64 +104,86 @@ Extract the data and return ONLY valid JSON:"""
         extraction_schema = schema or default_schema
         prompt = self._build_extraction_prompt(text, extraction_schema)
         
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a precise data extraction engine. Output only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 4000
+        }
+        
         try:
-            # Call OpenRouter/DeepSeek API
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://openmercura.local",
-                "X-Title": "OpenMercura"
-            }
+            # Call OpenRouter/DeepSeek API with retries
+            max_retries = min(len(self.api_keys), 3) if self.api_keys else 1
+            current_retry = 0
+            raw_text = None
             
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": "You are a precise data extraction engine. Output only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 4000
-            }
+            while current_retry <= max_retries:
+                try:
+                    headers = {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://openmercura.local",
+                        "X-Title": "OpenMercura"
+                    }
+                    
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        response = await client.post(
+                            self.api_url,
+                            headers=headers,
+                            json=payload
+                        )
+                        
+                        if response.status_code == 429 or response.status_code >= 500:
+                            if self._rotate_key():
+                                logger.warning(f"OpenRouter API limit/error ({response.status_code}). Rotating key... ({current_retry}/{max_retries})")
+                                current_retry += 1
+                                continue
+                        
+                        response.raise_for_status()
+                        data = response.json()
+                        raw_text = data["choices"][0]["message"]["content"]
+                        break
+                except httpx.HTTPError as e:
+                    if current_retry < max_retries and self._rotate_key():
+                        logger.warning(f"OpenRouter HTTP error: {e}. Rotating key... ({current_retry}/{max_retries})")
+                        current_retry += 1
+                        continue
+                    raise e
+
+            if not raw_text:
+                raise Exception("Failed to generate content from OpenRouter after retries")
+
+            # Clean up the response
+            raw_text = self._clean_json_response(raw_text)
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    self.api_url,
-                    headers=headers,
-                    json=payload
-                )
-                response.raise_for_status()
-                
-                data = response.json()
-                raw_text = data["choices"][0]["message"]["content"]
-                
-                # Clean up the response
-                raw_text = self._clean_json_response(raw_text)
-                
-                # Parse JSON
-                extracted_data = json.loads(raw_text)
-                
-                # Calculate metrics
-                processing_time = int((time.time() - start_time) * 1000)
-                line_items = extracted_data.get("line_items", [])
-                confidence = self._calculate_confidence(line_items)
-                
-                # Save to CRM if user_id provided
-                if user_id:
-                    await self._save_to_crm(
-                        user_id=user_id,
-                        line_items=line_items,
-                        metadata=extracted_data.get("metadata", {}),
-                        source=source,
-                        confidence=confidence
-                    )
-                
-                return ExtractionResponse(
-                    success=True,
+            # Parse JSON
+            extracted_data = json.loads(raw_text)
+            
+            # Calculate metrics
+            processing_time = int((time.time() - start_time) * 1000)
+            line_items = extracted_data.get("line_items", [])
+            confidence = self._calculate_confidence(line_items)
+            
+            # Save to CRM if user_id provided
+            if user_id:
+                await self._save_to_crm(
+                    user_id=user_id,
                     line_items=line_items,
-                    confidence_score=confidence,
-                    raw_response=raw_text,
-                    processing_time_ms=processing_time
+                    metadata=extracted_data.get("metadata", {}),
+                    source=source,
+                    confidence=confidence
                 )
+            
+            return ExtractionResponse(
+                success=True,
+                line_items=line_items,
+                confidence_score=confidence,
+                raw_response=raw_text,
+                processing_time_ms=processing_time
+            )
                 
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")

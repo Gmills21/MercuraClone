@@ -516,6 +516,9 @@ class Database:
                 .limit(20)\
                 .execute()
             return result.data
+        except Exception as e:
+            logger.error(f"Error searching catalog: {e}")
+            return []
 
     async def search_catalog_vector(
         self, 

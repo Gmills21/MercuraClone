@@ -9,14 +9,15 @@ from typing import Optional
 
 from app.quickbooks_service import (
     QuickBooksService, get_qb_service, is_connected,
-    disconnect, get_connection_info, QUICKBOOKS_CLIENT_ID
+    disconnect, get_connection_info, QUICKBOOKS_CLIENT_ID,
+    QBO_REDIRECT_URI
 )
 from app.database_sqlite import list_products, list_customers
 
 router = APIRouter(prefix="/quickbooks", tags=["quickbooks"])
 
-# Configuration
-REDIRECT_URI = "http://localhost:5173/quickbooks/callback"  # Frontend callback
+# Configuration - now using the one from service/settings
+REDIRECT_URI = QBO_REDIRECT_URI
 
 
 class QuickBooksStatusResponse(BaseModel):

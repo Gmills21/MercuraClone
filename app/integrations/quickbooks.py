@@ -12,12 +12,14 @@ from typing import Optional, Dict, Any, List
 import httpx
 from loguru import logger
 
+from app.config import settings
 from app.integrations import ERPProvider, ERPRegistry
 
 # QuickBooks OAuth2 settings
-QUICKBOOKS_CLIENT_ID = os.getenv("QUICKBOOKS_CLIENT_ID", "")
-QUICKBOOKS_CLIENT_SECRET = os.getenv("QUICKBOOKS_CLIENT_SECRET", "")
-QUICKBOOKS_SANDBOX = os.getenv("QUICKBOOKS_SANDBOX", "true").lower() == "true"
+QUICKBOOKS_CLIENT_ID = settings.qbo_client_id or os.getenv("QBO_CLIENT_ID", "")
+QUICKBOOKS_CLIENT_SECRET = settings.qbo_client_secret or os.getenv("QBO_CLIENT_SECRET", "")
+QUICKBOOKS_SANDBOX = settings.quickbooks_sandbox or os.getenv("QUICKBOOKS_SANDBOX", "true").lower() == "true"
+QBO_REDIRECT_URI = settings.qbo_redirect_uri or os.getenv("QBO_REDIRECT_URI", "")
 
 # URLs
 QB_BASE_URL = "https://sandbox-quickbooks.api.intuit.com" if QUICKBOOKS_SANDBOX else "https://quickbooks.api.intuit.com"

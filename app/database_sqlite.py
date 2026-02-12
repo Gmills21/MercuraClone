@@ -11,12 +11,28 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 from loguru import logger
 
-# Database path
-DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-DB_PATH = os.path.join(DB_DIR, "mercura.db")
+from app.config import settings
+
+# Database path - derived from settings.database_url
+# Handle sqlite:/// prefix
+db_url = settings.database_url
+if db_url.startswith("sqlite:///"):
+    DB_PATH = db_url.replace("sqlite:///", "")
+    # Handle both relative and absolute paths
+    if not os.path.isabs(DB_PATH) and not DB_PATH.startswith("./"):
+        # If it's just "mercura.db", make it relative to root
+        DB_PATH = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
+    elif DB_PATH.startswith("./"):
+        DB_PATH = os.path.abspath(os.path.join(os.getcwd(), DB_PATH[2:]))
+else:
+    # Fallback to default if URL is not sqlite
+    DB_PATH = os.path.abspath(os.path.join(os.getcwd(), "mercura.db"))
+
+DB_DIR = os.path.dirname(DB_PATH)
 
 # Ensure data directory exists
-os.makedirs(DB_DIR, exist_ok=True)
+if DB_DIR:
+    os.makedirs(DB_DIR, exist_ok=True)
 
 
 @contextmanager
@@ -103,12 +119,13 @@ def init_db():
         """)
         
         # Quotes table
-        # Quotes table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS quotes (
                 id TEXT PRIMARY KEY,
                 organization_id TEXT NOT NULL,
                 customer_id TEXT NOT NULL,
+                project_id TEXT,
+                assigned_user_id TEXT,
                 status TEXT NOT NULL DEFAULT 'draft',
                 subtotal REAL NOT NULL DEFAULT 0,
                 tax_rate REAL NOT NULL DEFAULT 0,
@@ -120,6 +137,8 @@ def init_db():
                 updated_at TEXT NOT NULL,
                 expires_at TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers (id),
+                FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE SET NULL,
+                FOREIGN KEY (assigned_user_id) REFERENCES users (id) ON DELETE SET NULL,
                 FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
             )
         """)
@@ -286,6 +305,56 @@ def init_db():
             )
         """)
         
+        # Projects table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                address TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Integration Secrets (Encrypted)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS integration_secrets (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                integration_type TEXT NOT NULL, -- 'quickbooks', 'hubspot', etc.
+                encrypted_data TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(organization_id, integration_type),
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Inbound Emails table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_emails (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                sender_email TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                subject_line TEXT,
+                body_plain TEXT,
+                body_html TEXT,
+                received_at TEXT NOT NULL,
+                status TEXT CHECK (status IN ('pending', 'processing', 'processed', 'failed')) DEFAULT 'pending',
+                error_message TEXT,
+                has_attachments INTEGER DEFAULT 0,
+                attachment_count INTEGER DEFAULT 0,
+                message_id TEXT UNIQUE,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_org ON customers (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_email ON customers (email)")
@@ -294,6 +363,11 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items (quote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitors_url ON competitors (url)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents (type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_project ON quotes (project_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects (organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_org ON inbound_emails(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_status ON inbound_emails(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_msgid ON inbound_emails(message_id)")
         
         # Organization indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)")
@@ -500,9 +574,23 @@ def get_quote_with_items(quote_id: str, organization_id: Optional[str] = None) -
         
         # Get quote
         if organization_id:
-            cursor.execute("SELECT * FROM quotes WHERE id = ? AND organization_id = ?", (quote_id, organization_id))
+            cursor.execute("""
+                SELECT q.*, c.name as customer_name, p.name as project_name, u.name as assignee_name
+                FROM quotes q
+                LEFT JOIN customers c ON q.customer_id = c.id
+                LEFT JOIN projects p ON q.project_id = p.id
+                LEFT JOIN users u ON q.assigned_user_id = u.id
+                WHERE q.id = ? AND q.organization_id = ?
+            """, (quote_id, organization_id))
         else:
-            cursor.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,))
+            cursor.execute("""
+                SELECT q.*, c.name as customer_name, p.name as project_name, u.name as assignee_name
+                FROM quotes q
+                LEFT JOIN customers c ON q.customer_id = c.id
+                LEFT JOIN projects p ON q.project_id = p.id
+                LEFT JOIN users u ON q.assigned_user_id = u.id
+                WHERE q.id = ?
+            """, (quote_id,))
             
         row = cursor.fetchone()
         if not row:
@@ -523,12 +611,14 @@ def create_quote(quote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO quotes (id, organization_id, customer_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO quotes (id, organization_id, customer_id, project_id, assigned_user_id, status, subtotal, tax_rate, tax_amount, total, notes, token, created_at, updated_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote["id"],
                 quote["organization_id"],
                 quote["customer_id"],
+                quote.get("project_id"),
+                quote.get("assigned_user_id"),
                 quote.get("status", "draft"),
                 quote.get("subtotal", 0),
                 quote.get("tax_rate", 0),
@@ -573,14 +663,44 @@ def add_quote_item(item: Dict[str, Any]) -> bool:
 
 
 def list_quotes(organization_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    """List all quotes for an organization."""
+    """List all quotes for an organization with customer and project names."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM quotes WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (organization_id, limit, offset)
-        )
+        cursor.execute("""
+            SELECT q.*, c.name as customer_name, p.name as project_name, u.name as assignee_name
+            FROM quotes q
+            LEFT JOIN customers c ON q.customer_id = c.id
+            LEFT JOIN projects p ON q.project_id = p.id
+            LEFT JOIN users u ON q.assigned_user_id = u.id
+            WHERE q.organization_id = ?
+            ORDER BY q.created_at DESC
+            LIMIT ? OFFSET ?
+        """, (organization_id, limit, offset))
         return [dict(row) for row in cursor.fetchall()]
+
+
+def update_quote(quote_id: str, updates: Dict[str, Any], organization_id: str) -> bool:
+    """Update quote fields."""
+    allowed_fields = ["status", "assigned_user_id", "notes", "project_id"]
+    set_parts = []
+    values = []
+    
+    for k, v in updates.items():
+        if k in allowed_fields:
+            set_parts.append(f"{k} = ?")
+            values.append(v)
+    
+    if not set_parts:
+        return False
+    
+    values.extend([datetime.utcnow().isoformat(), quote_id, organization_id])
+    query = f"UPDATE quotes SET {', '.join(set_parts)}, updated_at = ? WHERE id = ? AND organization_id = ?"
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, values)
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def get_quote_by_token(token: str) -> Optional[Dict[str, Any]]:
@@ -733,6 +853,271 @@ def list_extractions(organization_id: str, status: Optional[str] = None) -> List
             data["parsed_data"] = json.loads(data.get("parsed_data", "{}"))
             results.append(data)
         return results
+
+
+def get_extraction(extraction_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get single extraction by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM extractions WHERE id = ? AND organization_id = ?",
+            (extraction_id, organization_id)
+        )
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["parsed_data"] = json.loads(data.get("parsed_data", "{}"))
+            return data
+        return None
+
+
+# Integration Secret operations
+def save_integration_secret(organization_id: str, integration_type: str, encrypted_data: str) -> bool:
+    """Save or update encrypted integration secret."""
+    import uuid
+    now = datetime.utcnow().isoformat()
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO integration_secrets (id, organization_id, integration_type, encrypted_data, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(organization_id, integration_type) DO UPDATE SET
+                    encrypted_data = excluded.encrypted_data,
+                    updated_at = excluded.updated_at
+            """, (str(uuid.uuid4()), organization_id, integration_type, encrypted_data, now, now))
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logger.error(f"Failed to save integration secret: {e}")
+        return False
+
+
+def get_integration_secret(organization_id: str, integration_type: str) -> Optional[str]:
+    """Get encrypted integration secret."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT encrypted_data FROM integration_secrets WHERE organization_id = ? AND integration_type = ?",
+            (organization_id, integration_type)
+        )
+        row = cursor.fetchone()
+        return row["encrypted_data"] if row else None
+
+
+# Project operations
+def create_project(project: Dict[str, Any]) -> bool:
+    """Create a new project."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO projects (id, organization_id, name, address, status, created_at, updated_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project["id"],
+                project["organization_id"],
+                project["name"],
+                project.get("address"),
+                project.get("status", "active"),
+                project["created_at"],
+                project["updated_at"],
+                json.dumps(project.get("metadata", {}))
+            ))
+            conn.commit()
+            return True
+    except sqlite3.IntegrityError as e:
+        logger.error(f"Project creation failed: {e}")
+        return False
+
+def get_project_by_id(project_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get project by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM projects WHERE id = ? AND organization_id = ?", (project_id, organization_id))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+def list_projects(organization_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """List all projects for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM projects WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (organization_id, limit, offset)
+        )
+        results = []
+        for row in cursor.fetchall():
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            results.append(data)
+        return results
+
+def update_project(project_id: str, updates: Dict[str, Any], organization_id: str) -> bool:
+    """Update project fields."""
+    allowed_fields = ["name", "address", "status", "metadata"]
+    set_parts = []
+    values = []
+    
+    for k, v in updates.items():
+        if k in allowed_fields:
+            if k == "metadata":
+                set_parts.append(f"{k} = ?")
+                values.append(json.dumps(v))
+            else:
+                set_parts.append(f"{k} = ?")
+                values.append(v)
+    
+    if not set_parts:
+        return False
+    
+    values.extend([datetime.utcnow().isoformat(), project_id, organization_id])
+    query = f"UPDATE projects SET {', '.join(set_parts)}, updated_at = ? WHERE id = ? AND organization_id = ?"
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, values)
+        conn.commit()
+        return cursor.rowcount > 0
+
+def get_quotes_by_project(project_id: str, organization_id: str) -> List[Dict[str, Any]]:
+    """Get all quotes belonging to a project."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM quotes WHERE project_id = ? AND organization_id = ? ORDER BY created_at DESC",
+            (project_id, organization_id)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# Inbound Email Operations
+def create_inbound_email(email: Dict[str, Any]) -> bool:
+    """Create a new inbound email record."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO inbound_emails (
+                    id, organization_id, sender_email, recipient_email, 
+                    subject_line, body_plain, body_html, received_at,
+                    status, error_message, has_attachments, attachment_count,
+                    message_id, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                email["id"],
+                email["organization_id"],
+                email["sender_email"],
+                email["recipient_email"],
+                email.get("subject_line"),
+                email.get("body_plain"),
+                email.get("body_html"),
+                email["received_at"],
+                email.get("status", "pending"),
+                email.get("error_message"),
+                1 if email.get("has_attachments") else 0,
+                email.get("attachment_count", 0),
+                email.get("message_id"),
+                json.dumps(email.get("metadata", {}))
+            ))
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logger.error(f"Failed to create inbound email: {e}")
+        return False
+
+def get_email_by_message_id(message_id: str) -> Optional[Dict[str, Any]]:
+    """Get email by its Message-ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM inbound_emails WHERE message_id = ?", (message_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+def update_email_status(email_id: str, status: str, error_message: Optional[str] = None) -> bool:
+    """Update the status of an inbound email."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if error_message:
+            cursor.execute(
+                "UPDATE inbound_emails SET status = ?, error_message = ? WHERE id = ?",
+                (status, error_message, email_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE inbound_emails SET status = ? WHERE id = ?",
+                (status, email_id)
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+
+def list_emails(organization_id: str, status: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    """List inbound emails for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM inbound_emails WHERE organization_id = ?"
+        params = [organization_id]
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+            
+        query += " ORDER BY received_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        results = []
+        for row in cursor.fetchall():
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            results.append(data)
+        return results
+
+def get_quotes_by_email(email_id: str, organization_id: str) -> List[Dict[str, Any]]:
+    """Get all quotes created from a specific email."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Find quotes where metadata['source_email_id'] == email_id
+        # In SQLite we might need to search the JSON string in metadata
+        cursor.execute("""
+            SELECT * FROM quotes 
+            WHERE organization_id = ? AND metadata LIKE ?
+            ORDER BY created_at DESC
+        """, (organization_id, f'%"source_email_id": "{email_id}"%'))
+        
+        results = []
+        for row in cursor.fetchall():
+            q_id = row["id"]
+            # Fetch with items
+            q = get_quote_with_items(q_id, organization_id=organization_id)
+            if q:
+                results.append(q)
+        return results
+
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """Get user by email address."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_organization_by_slug(slug: str) -> Optional[Dict[str, Any]]:
+    """Get organization by slug."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM organizations WHERE slug = ?", (slug,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 
 # Initialize on module load

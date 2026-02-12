@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from app.database_sqlite import get_db
+from app.posthog_utils import capture_event
 
 
 def get_quote_statistics(days: int = 30) -> Dict[str, Any]:
@@ -136,8 +137,9 @@ def get_sales_velocity_metrics() -> Dict[str, Any]:
     }
 
 
-def track_quote_event(quote_id: str, event_type: str, metadata: Dict[str, Any] = None):
+def track_quote_event(quote_id: str, event_type: str, metadata: Dict[str, Any] = None, user_id: str = "anonymous"):
     """Track a quote lifecycle event."""
+    # Track locally for dashboard
     with get_db() as conn:
         cursor = conn.cursor()
         
@@ -164,3 +166,13 @@ def track_quote_event(quote_id: str, event_type: str, metadata: Dict[str, Any] =
             datetime.utcnow().isoformat()
         ))
         conn.commit()
+    
+    # Forward to PostHog for deep analytics
+    capture_event(
+        distinct_id=user_id,
+        event_name=f"quote_{event_type}",
+        properties={
+            "quote_id": quote_id,
+            **(metadata or {})
+        }
+    )

@@ -1,75 +1,84 @@
 @import "tailwindcss";
 
+/* ============================================
+   LINEAR / VERCEL DESIGN SYSTEM
+   ============================================ */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    /* Core colors - No pure blacks, use Slate */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    /* Slate-950 equivalent */
 
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
+    --popover-foreground: 222 47% 11%;
 
+    /* Accent colors */
     --primary: 24 95% 53%;
-    /* Orange-600 */
+    /* Orange-600 primary */
     --primary-foreground: 0 0% 98%;
 
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
+    --secondary: 215 28% 17%;
+    /* Slate-800 */
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted: 215 20% 91%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    --accent: 215 16% 93%;
+    --accent-foreground: 222 47% 11%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
+    /* Borders at 5% opacity */
+    --border: 215 28% 88%;
+    --input: 215 28% 88%;
     --ring: 24 95% 53%;
 
-    --radius: 0.75rem;
-    /* rounded-xl by default */
+    /* Border radius - slightly smaller for minimalist feel */
+    --radius: 0.625rem;
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    /* Zinc-950 approx */
-    --foreground: 0 0% 98%;
+    --background: 222 47% 5%;
+    /* Near Slate-950 */
+    --foreground: 210 40% 98%;
 
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
 
     --primary: 24 95% 53%;
     --primary-foreground: 0 0% 98%;
 
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 215 28% 17%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+    --muted: 215 28% 17%;
+    --muted-foreground: 215 16% 56%;
 
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 215 28% 17%;
+    --accent-foreground: 210 40% 98%;
 
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    --border: 215 28% 17%;
+    --input: 215 28% 17%;
     --ring: 24 95% 53%;
   }
 }
 
 @layer base {
   * {
-    border-color: hsl(var(--border));
+    border-color: hsl(var(--border) / 0.05);
   }
 
   body {
@@ -77,9 +86,11 @@
     color: hsl(var(--foreground));
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Typography "Anti-Blocky" Fixes */
+  /* Typography - Linear/Vercel Style */
   h1,
   h2,
   h3,
@@ -87,20 +98,396 @@
   h5,
   h6 {
     @apply tracking-tight font-semibold;
+    color: theme('colors.slate.950');
   }
 }
 
+/* ============================================
+   UTILITY CLASSES - LINEAR/VERCEL STYLE
+   ============================================ */
 @layer utilities {
+
+  /* Technical Grid Background Pattern */
+  .tech-grid {
+    background-size: 40px 40px;
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+  }
+
+  /* Finer grid variant for document panels */
+  .tech-grid-fine {
+    background-size: 20px 20px;
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+  }
+
+  /* Dark theme tech grid */
+  .tech-grid-dark {
+    background-size: 40px 40px;
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  }
+
+  /* Hover Lift Effect - Primary interaction pattern */
+  .hover-lift {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .hover-lift:hover {
+    @apply -translate-y-1;
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 10px 15px -3px rgba(0, 0, 0, 0.05),
+      0 20px 25px -5px rgba(0, 0, 0, 0.03);
+  }
+
+  /* Subtle card shadow - diffused, soft */
+  .shadow-soft {
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.02),
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02);
+  }
+
+  .shadow-soft-lg {
+    box-shadow:
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02),
+      0 8px 16px 0 rgba(0, 0, 0, 0.03),
+      0 16px 32px 0 rgba(0, 0, 0, 0.03);
+  }
+
+  /* Minimal Border - 1px at 5% opacity */
+  .border-minimal {
+    border: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  .border-minimal-dark {
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  /* Glass effect for overlays - using raw CSS to avoid @apply order issues */
   .glass {
-    @apply bg-white/70 backdrop-blur-lg border border-white/20 shadow-sm;
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.02),
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02);
   }
 
   .glass-dark {
-    @apply bg-zinc-950/70 backdrop-blur-lg border border-white/5 shadow-sm;
+    background-color: rgba(2, 6, 23, 0.8);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.02),
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02);
   }
 
-  /* Radical Minimalism Spacing */
+  /* Radical Minimalism Spacing - 2x padding */
   .section-padding {
+    @apply p-12 md:p-16;
+  }
+
+  .section-padding-sm {
     @apply p-8 md:p-12;
   }
+
+  /* Bento Grid Card - using raw CSS to avoid @apply order issues */
+  .bento-card {
+    @apply bg-white rounded-xl transition-all duration-300 ease-out;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.02),
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02);
+  }
+
+  .bento-card:hover {
+    @apply -translate-y-1;
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 10px 15px -3px rgba(0, 0, 0, 0.05),
+      0 20px 25px -5px rgba(0, 0, 0, 0.03);
+  }
+
+  .bento-card-dark {
+    @apply bg-slate-900 rounded-xl transition-all duration-300 ease-out;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.02),
+      0 2px 4px 0 rgba(0, 0, 0, 0.02),
+      0 4px 8px 0 rgba(0, 0, 0, 0.02);
+  }
+
+  .bento-card-dark:hover {
+    @apply -translate-y-1;
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 10px 15px -3px rgba(0, 0, 0, 0.05),
+      0 20px 25px -5px rgba(0, 0, 0, 0.03);
+  }
+
+  /* Custom Scrollbar - Minimal */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 10px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.4);
+  }
+
+  /* === Status Badge Styles === */
+  .badge-status {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  .badge-status-draft {
+    @apply bg-slate-100 text-slate-700;
+  }
+
+  .badge-status-pending {
+    @apply bg-orange-50 text-orange-700;
+  }
+
+  .badge-status-active {
+    @apply bg-blue-50 text-blue-700;
+  }
+
+  .badge-status-success {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
+  .badge-status-error {
+    @apply bg-red-50 text-red-700;
+  }
+
+  /* Confidence badges */
+  .badge-confidence {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold;
+  }
+
+  .badge-confidence-high {
+    @apply bg-emerald-500/15 text-emerald-600;
+  }
+
+  .badge-confidence-medium {
+    @apply bg-amber-500/15 text-amber-600;
+  }
+
+  .badge-confidence-low {
+    @apply bg-red-500/15 text-red-600;
+  }
+
+  /* Alert badges - minimal */
+  .badge-alert {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  .badge-alert-high {
+    @apply bg-red-50 text-red-600;
+  }
+
+  .badge-alert-medium {
+    @apply bg-blue-50 text-blue-600;
+  }
+
+  .badge-alert-low {
+    @apply bg-slate-50 text-slate-600;
+  }
 }
+
+/* === Animation Keyframes === */
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50% {
+    transform: translateX(100%);
+  }
+
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+/* Subtle shimmer for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg,
+      rgba(148, 163, 184, 0.1) 25%,
+      rgba(148, 163, 184, 0.2) 50%,
+      rgba(148, 163, 184, 0.1) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+ / *   = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
+       T I P T A P   E D I T O R   S T Y L E S 
+       = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =   * / 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   { 
+     p a d d i n g :   1 r e m ; 
+     o u t l i n e :   n o n e ; 
+     m i n - h e i g h t :   i n h e r i t ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   p . i s - e d i t o r - e m p t y : f i r s t - c h i l d : : b e f o r e   { 
+     c o n t e n t :   a t t r ( d a t a - p l a c e h o l d e r ) ; 
+     f l o a t :   l e f t ; 
+     c o l o r :   # 9 4 a 3 b 8 ; 
+     p o i n t e r - e v e n t s :   n o n e ; 
+     h e i g h t :   0 ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   t a b l e   { 
+     b o r d e r - c o l l a p s e :   c o l l a p s e ; 
+     t a b l e - l a y o u t :   f i x e d ; 
+     w i d t h :   1 0 0 % ; 
+     m a r g i n :   0 ; 
+     o v e r f l o w :   h i d d e n ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   t a b l e   t d , 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   t a b l e   t h   { 
+     m i n - w i d t h :   1 e m ; 
+     b o r d e r :   1 p x   s o l i d   # e 2 e 8 f 0 ; 
+     p a d d i n g :   8 p x   1 2 p x ; 
+     v e r t i c a l - a l i g n :   t o p ; 
+     b o x - s i z i n g :   b o r d e r - b o x ; 
+     p o s i t i o n :   r e l a t i v e ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   t a b l e   t h   { 
+     f o n t - w e i g h t :   b o l d ; 
+     t e x t - a l i g n :   l e f t ; 
+     b a c k g r o u n d - c o l o r :   # f 8 f a f c ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   b l o c k q u o t e   { 
+     b o r d e r - l e f t :   3 p x   s o l i d   # e 2 e 8 f 0 ; 
+     p a d d i n g - l e f t :   1 r e m ; 
+     f o n t - s t y l e :   i t a l i c ; 
+     c o l o r :   # 4 7 5 5 6 9 ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   u l   { 
+     l i s t - s t y l e - t y p e :   d i s c ; 
+     p a d d i n g - l e f t :   1 . 5 r e m ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   o l   { 
+     l i s t - s t y l e - t y p e :   d e c i m a l ; 
+     p a d d i n g - l e f t :   1 . 5 r e m ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   a   { 
+     c o l o r :   # e a 5 8 0 c ; 
+     t e x t - d e c o r a t i o n :   u n d e r l i n e ; 
+     c u r s o r :   p o i n t e r ; 
+ } 
+ 
+ . t i p t a p - e d i t o r - c o n t e n t   . t i p t a p   h r   { 
+     b o r d e r :   n o n e ; 
+     b o r d e r - t o p :   1 p x   s o l i d   # e 2 e 8 f 0 ; 
+     m a r g i n :   1 . 5 r e m   0 ; 
+ } 
+  
+ 
+ . t i p t a p - c o n t e n t   { 
+     l i n e - h e i g h t :   1 . 6 ; 
+ } 
+ 
+ . t i p t a p - c o n t e n t   p   { 
+     m a r g i n - b o t t o m :   0 . 5 r e m ; 
+ } 
+ 
+ . t i p t a p - c o n t e n t   u l   { 
+     l i s t - s t y l e - t y p e :   d i s c ; 
+     p a d d i n g - l e f t :   1 . 5 r e m ; 
+     m a r g i n - b o t t o m :   0 . 5 r e m ; 
+ } 
+ 
+ . t i p t a p - c o n t e n t   o l   { 
+     l i s t - s t y l e - t y p e :   d e c i m a l ; 
+     p a d d i n g - l e f t :   1 . 5 r e m ; 
+     m a r g i n - b o t t o m :   0 . 5 r e m ; 
+ } 
+ 
+ . t i p t a p - c o n t e n t   t a b l e   { 
+     b o r d e r - c o l l a p s e :   c o l l a p s e ; 
+     w i d t h :   1 0 0 % ; 
+     m a r g i n :   1 r e m   0 ; 
+ } 
+ 
+ . t i p t a p - c o n t e n t   t d ,   . t i p t a p - c o n t e n t   t h   { 
+     b o r d e r :   1 p x   s o l i d   # e 2 e 8 f 0 ; 
+     p a d d i n g :   8 p x ; 
+ } 
+  
+ 

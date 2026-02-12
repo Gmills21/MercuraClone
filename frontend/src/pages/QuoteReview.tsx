@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { quotesApi, productsApi, quotesApiExtended, quickbooksApi } from '../services/api';
+import { SmartEditor } from '../components/ui/SmartEditor';
 import { Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, Link as LinkIcon, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
+import { trackEvent } from '../posthog';
 
 export const QuoteReview = () => {
     const { id } = useParams();
@@ -11,6 +13,7 @@ export const QuoteReview = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [syncingQB, setSyncingQB] = useState(false);
+    const [hasBeenEdited, setHasBeenEdited] = useState(false);
 
     // Suggestions state
     const [suggestions, setSuggestions] = useState<{ [key: number]: any[] }>({});
@@ -67,6 +70,7 @@ export const QuoteReview = () => {
             newItems[index].total_price = Number(qty) * Number(price);
         }
         setLineItems(newItems);
+        setHasBeenEdited(true);
     };
 
     const calculateTotal = () => {
@@ -175,6 +179,14 @@ export const QuoteReview = () => {
 
             await quotesApi.update(id!, updateData);
 
+            if (approve) {
+                trackEvent(hasBeenEdited ? 'extraction_edited' : 'extraction_verified', {
+                    quote_id: id,
+                    item_count: lineItems.length,
+                    total_amount: total
+                });
+            }
+
             fetchQuote(id!);
             if (approve) {
                 alert('Quote approved! You can now sink to QuickBooks.');
@@ -269,6 +281,12 @@ export const QuoteReview = () => {
 
     const swapAndOptimize = (index: number, match: any) => {
         applySuggestion(index, match);
+        trackEvent('smart_product_matching', {
+            type: 'manual_swap',
+            quote_id: id,
+            match_score: match.score,
+            match_type: match.match_type
+        });
     };
 
     const applyAllBestMatches = () => {
@@ -300,6 +318,11 @@ export const QuoteReview = () => {
 
         if (appliedCount > 0) {
             setLineItems(newItems);
+            trackEvent('smart_product_matching', {
+                type: 'auto_matched',
+                quote_id: id,
+                count: appliedCount
+            });
             alert(`Applied ${appliedCount} best matches automatically.`);
         } else {
             alert("No high-confidence matches found to apply.");
@@ -324,8 +347,8 @@ export const QuoteReview = () => {
                     <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                         {quote.quote_number}
                         <span className={`text-xs px-2 py-1 rounded-full uppercase border ${quote.status === 'approved'
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
                             }`}>
                             {quote.status.replace('_', ' ')}
                         </span>
@@ -506,7 +529,7 @@ export const QuoteReview = () => {
                                                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                         <span className="text-xs text-slate-500">Margin:</span>
                                                         <span className={`text-xs font-medium ${currentMargin > 20 ? 'text-emerald-400' :
-                                                                currentMargin > 10 ? 'text-amber-400' : 'text-red-400'
+                                                            currentMargin > 10 ? 'text-amber-400' : 'text-red-400'
                                                             }`}>
                                                             {currentMargin.toFixed(1)}%
                                                         </span>
@@ -698,17 +721,17 @@ export const QuoteReview = () => {
                                     return (
                                         <React.Fragment key={index}>
                                             <tr className={`group hover:bg-slate-800/30 transition-colors ${item.metadata?.match_score ? 'bg-green-500/5' :
-                                                    (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
+                                                (item.metadata?.original_extraction?.confidence_score < 0.7 ? 'bg-red-500/5' : '')
                                                 }`}>
                                                 <td className="px-6 py-4">
                                                     <div className="flex flex-col gap-1">
                                                         <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="text"
-                                                                value={item.description || ''}
-                                                                onChange={(e) => updateItem(index, 'description', e.target.value)}
-                                                                className="bg-transparent border-none w-full text-slate-200 focus:ring-0 p-0 placeholder-slate-600"
-                                                                placeholder="Item description"
+                                                            <SmartEditor
+                                                                content={item.description || ''}
+                                                                onChange={(html) => updateItem(index, 'description', html)}
+                                                                className="w-full bg-slate-900/20"
+                                                                minHeight="80px"
+                                                                placeholder="Item description & technical specs..."
                                                             />
                                                             {/* Phase 2: Margin Boost Badge in Table View */}
                                                             {suggestions[index] && suggestions[index].length > 0 && (() => {
@@ -798,10 +821,10 @@ export const QuoteReview = () => {
                                                     {item.metadata?.original_extraction?.confidence_score && (
                                                         <div className="flex justify-center" title="Extraction Confidence">
                                                             <span className={`text-xs px-2 py-1 rounded-full ${item.metadata.original_extraction.confidence_score > 0.8
-                                                                    ? 'bg-emerald-500/10 text-emerald-400'
-                                                                    : item.metadata.original_extraction.confidence_score < 0.7
-                                                                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                                                        : 'bg-amber-500/10 text-amber-400'
+                                                                ? 'bg-emerald-500/10 text-emerald-400'
+                                                                : item.metadata.original_extraction.confidence_score < 0.7
+                                                                    ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                                                    : 'bg-amber-500/10 text-amber-400'
                                                                 }`}>
                                                                 {Math.round(item.metadata.original_extraction.confidence_score * 100)}%
                                                             </span>

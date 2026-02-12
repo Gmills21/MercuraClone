@@ -41,6 +41,7 @@ class GeminiService:
                 "document_type": "string (invoice/purchase_order/catalog)",
                 "document_number": "string",
                 "date": "string (ISO format)",
+                "deadline": "string (deadline or due date if found, ISO format)",
                 "vendor": "string",
                 "total_amount": "float",
                 "currency": "string"

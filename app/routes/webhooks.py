@@ -7,6 +7,7 @@ from app.models import WebhookPayload, InboundEmail, EmailStatus, Quote, QuoteIt
 from app.database import db
 from app.services.gemini_service import gemini_service
 from app.config import settings
+from app.services.n8n_service import n8n_service
 import hmac
 import hashlib
 import base64
@@ -101,6 +102,43 @@ async def process_email_webhook(payload: WebhookPayload) -> dict:
                     "email_id": existing_email['id'],
                     "message": "Email already processed"
                 }
+
+        # Step 1.5: Forward to n8n if enabled (Legacy Bridge / Auto-Drafting)
+        if settings.n8n_enabled:
+            logger.info(f"Forwarding email from {payload.sender} to n8n")
+            # Convert payload to dict
+            n8n_payload = payload.dict()
+            # We don't send large attachments via webhook usually, but n8n can handle JSON
+            # However, for efficiency we might want to strip content if it's huge, 
+            # but users want n8n to process it. assuming n8n can handle it.
+            
+            # Fire and forget (or await)
+            await n8n_service.trigger_webhook("inbound_email", n8n_payload)
+            # If n8n handles it entirely, we might want to return here?
+            # "The Workflow: n8n monitors... sends it to your extraction_unified.py"
+            # If we forward to n8n, and n8n sends back to extraction_unified, 
+            # we shouldn't continue processing locally to avoid duplication.
+            # But maybe we want dual processing for safety during migration?
+            # The prompt says "n8n acts as the flexible workflow layer".
+            # Let's assume we continue local processing unless configured otherwise, 
+            # OR we return early. 
+            # Given "sends it to your extraction_unified.py", n8n will call us back.
+            # So we should probably STOP local processing here to avoid double-processing.
+            
+            # For now, I will NOT return early to be safe (unless user says stop local),
+            # but I will mark it as forwarded.
+            # Actually, to prevent "double draft", I should probably return early 
+            # IF n8n is going to call extraction_unified.
+            # Let's add a log and continue for now to be safe, or maybe return.
+            # "n8n can turn this into a proactive Auto-Drafting engine".
+            # If n8n does it, we don't need to do it here.
+            # I'll return early.
+            
+            return {
+                "status": "forwarded_to_n8n",
+                "email_id": "n8n_managed", 
+                "message": f"Email forwarded to n8n workflow"
+            }
         
         # Step 2: Create inbound email record
         inbound_email = InboundEmail(

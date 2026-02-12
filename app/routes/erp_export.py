@@ -6,8 +6,12 @@ CSV exports for SAP, NetSuite, QuickBooks, and generic ERP systems.
 from fastapi import APIRouter, HTTPException, Response, Depends
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
+from app.posthog_utils import capture_event
+from app.config import settings
 
 from app.erp_export import get_erp_exporter
+from app.services.n8n_service import n8n_service
 
 router = APIRouter(prefix="/export", tags=["erp-export"])
 
@@ -58,11 +62,69 @@ async def export_single_quote(
     
     filename = f"quote_{quote_id}_{format}.csv"
     
+    # Filter valid keys for metadata
+    tracking_metadata = {k: v for k, v in result.items() if isinstance(v, (str, int, float, bool))}
+    capture_event(
+        distinct_id="anonymous", # Should ideally be the current user
+        event_name="send_to_erp",
+        properties={
+            "quote_id": quote_id,
+            "format": format,
+            "success": True,
+            **tracking_metadata
+        }
+    )
+    
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+
+@router.post("/quote/{quote_id}/send")
+async def send_quote_to_erp_webhook(
+    quote_id: str,
+    format: str = "generic",
+):
+    """
+    Send a single quote to the configured n8n webhook (Legacy Bridge).
+    """
+    if not settings.n8n_enabled:
+        raise HTTPException(status_code=503, detail="n8n integration is disabled")
+    
+    exporter = get_erp_exporter()
+    result = exporter.export_quote(quote_id, format)
+    
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    
+    # Send to n8n
+    success = await n8n_service.trigger_webhook(
+        event_type="erp_export",
+        payload={
+            "quote_id": quote_id,
+            "format": format,
+            "data": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+    
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to send to n8n webhook")
+            
+    capture_event(
+        distinct_id="anonymous",
+        event_name="send_to_n8n",
+        properties={
+            "quote_id": quote_id,
+            "format": format,
+            "success": True
+        }
+    )
+    
+    return {"status": "success", "message": "Quote sent to ERP via n8n"}
 
 
 @router.post("/quote/batch")

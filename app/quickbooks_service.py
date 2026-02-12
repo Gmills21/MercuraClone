@@ -12,11 +12,15 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 import httpx
 from loguru import logger
+from app.config import settings
+from app.services.security_service import security_service
+from app import database_sqlite as db  # Using local SQLite for persistence
 
 # QuickBooks OAuth2 settings
-QUICKBOOKS_CLIENT_ID = os.getenv("QUICKBOOKS_CLIENT_ID", "")
-QUICKBOOKS_CLIENT_SECRET = os.getenv("QUICKBOOKS_CLIENT_SECRET", "")
-QUICKBOOKS_SANDBOX = os.getenv("QUICKBOOKS_SANDBOX", "true").lower() == "true"
+QUICKBOOKS_CLIENT_ID = settings.qbo_client_id or os.getenv("QBO_CLIENT_ID", "")
+QUICKBOOKS_CLIENT_SECRET = settings.qbo_client_secret or os.getenv("QBO_CLIENT_SECRET", "")
+QUICKBOOKS_SANDBOX = settings.quickbooks_sandbox or os.getenv("QUICKBOOKS_SANDBOX", "true").lower() == "true"
+QBO_REDIRECT_URI = settings.qbo_redirect_uri or os.getenv("QBO_REDIRECT_URI", "")
 
 # URLs
 QB_BASE_URL = "https://sandbox-quickbooks.api.intuit.com" if QUICKBOOKS_SANDBOX else "https://quickbooks.api.intuit.com"
@@ -110,8 +114,7 @@ class QuickBooksService:
                 if response.status_code == 200:
                     token_data = response.json()
                     
-                    # Store tokens
-                    _qb_tokens[user_id] = {
+                    token_dict = {
                         "access_token": token_data["access_token"],
                         "refresh_token": token_data["refresh_token"],
                         "realm_id": token_data.get("realmId"),
@@ -119,10 +122,18 @@ class QuickBooksService:
                         "connected_at": datetime.utcnow().isoformat(),
                     }
                     
+                    # Store in-memory
+                    _qb_tokens[user_id] = token_dict
+                    
+                    # Store in DB (Encrypted) - for now using user_id as organization_id 
+                    # if we don't have the real organization_id handy
+                    encrypted_data = security_service.encrypt(json.dumps(token_dict))
+                    db.save_integration_secret(user_id, "quickbooks", encrypted_data)
+                    
                     # Clean up verifier
                     del _qb_tokens[f"{user_id}_verifier"]
                     
-                    logger.info(f"QuickBooks connected for user {user_id}")
+                    logger.info(f"QuickBooks connected and encrypted for user {user_id}")
                     return {
                         "success": True,
                         "realm_id": token_data.get("realmId"),
@@ -353,13 +364,31 @@ class QuickBooksService:
 # ========== HELPER FUNCTIONS ==========
 
 def get_qb_service(user_id: str) -> Optional[QuickBooksService]:
-    """Get QuickBooks service for a user."""
+    """Get QuickBooks service for a user, loading from DB if needed."""
     token_data = _qb_tokens.get(user_id)
+    
+    if not token_data:
+        # Try loading from DB
+        encrypted_data = db.get_integration_secret(user_id, "quickbooks")
+        if encrypted_data:
+            try:
+                decrypted_json = security_service.decrypt(encrypted_data)
+                token_data = json.loads(decrypted_json)
+                _qb_tokens[user_id] = token_data
+                logger.info(f"Loaded and decrypted QuickBooks tokens for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to decrypt QB tokens for {user_id}: {e}")
+                return None
+    
     if not token_data:
         return None
     
     # Check if token is expired (simplified - should refresh in production)
-    expires_at = datetime.fromisoformat(token_data["expires_at"])
+    expires_at_str = token_data.get("expires_at")
+    if not expires_at_str:
+        return None
+        
+    expires_at = datetime.fromisoformat(expires_at_str)
     if datetime.utcnow() > expires_at:
         logger.warning(f"QuickBooks token expired for user {user_id}")
         return None

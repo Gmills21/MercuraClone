@@ -1,22 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { emailsApi, quotesApiExtended } from '../services/api';
-import { Mail, CheckCircle, XCircle, Clock, AlertCircle, FileText, Send, Download, Eye, ArrowRight, Sparkles, Search, Package } from 'lucide-react';
+import { emailsApi, quotesApiExtended, organizationsApi } from '../services/api';
+import { Mail, CheckCircle, XCircle, Clock, AlertCircle, FileText, Send, Download, Eye, ArrowRight, Sparkles, Search, Package, Copy } from 'lucide-react';
 
 export const Emails = () => {
     const navigate = useNavigate();
     const [emails, setEmails] = useState<any[]>([]);
+    const [org, setOrg] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState<string>('');
-    const [emailQuotes, setEmailQuotes] = useState<{[key: string]: any[]}>({});
-    const [loadingQuotes, setLoadingQuotes] = useState<{[key: string]: boolean}>({});
-    const [draftReplies, setDraftReplies] = useState<{[key: string]: any}>({});
+    const [emailQuotes, setEmailQuotes] = useState<{ [key: string]: any[] }>({});
+    const [loadingQuotes, setLoadingQuotes] = useState<{ [key: string]: boolean }>({});
+    const [draftReplies, setDraftReplies] = useState<{ [key: string]: any }>({});
     const [generatingDraft, setGeneratingDraft] = useState<string | null>(null);
 
     useEffect(() => {
+        fetchOrg();
         fetchEmails();
     }, [statusFilter]);
+
+    const fetchOrg = async () => {
+        try {
+            const res = await organizationsApi.getMe();
+            setOrg(res.data);
+        } catch (err) {
+            console.error('Failed to load organization:', err);
+        }
+    };
 
     const fetchEmails = () => {
         setLoading(true);
@@ -41,14 +52,14 @@ export const Emails = () => {
 
     const fetchQuotesForEmail = async (emailId: string) => {
         if (loadingQuotes[emailId]) return;
-        setLoadingQuotes({...loadingQuotes, [emailId]: true});
+        setLoadingQuotes({ ...loadingQuotes, [emailId]: true });
         try {
             const res = await quotesApiExtended.getByEmail(emailId);
-            setEmailQuotes({...emailQuotes, [emailId]: res.data.quotes || []});
+            setEmailQuotes({ ...emailQuotes, [emailId]: res.data.quotes || [] });
         } catch (error) {
             console.error('Error fetching quotes for email:', error);
         } finally {
-            setLoadingQuotes({...loadingQuotes, [emailId]: false});
+            setLoadingQuotes({ ...loadingQuotes, [emailId]: false });
         }
     };
 
@@ -61,8 +72,8 @@ export const Emails = () => {
         setGeneratingDraft(quoteId);
         try {
             const res = await quotesApiExtended.draftReply(quoteId);
-            setDraftReplies({...draftReplies, [quoteId]: res.data});
-            
+            setDraftReplies({ ...draftReplies, [quoteId]: res.data });
+
             // Open email client with draft
             const mailtoLink = `mailto:${res.data.to_email}?subject=${encodeURIComponent(res.data.subject)}&body=${encodeURIComponent(res.data.body)}`;
             window.open(mailtoLink);
@@ -77,8 +88,8 @@ export const Emails = () => {
     const handleDownloadQuote = async (quoteId: string, quoteNumber: string) => {
         try {
             const res = await quotesApiExtended.generateExport(quoteId, 'excel');
-            const blob = new Blob([res.data], { 
-                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+            const blob = new Blob([res.data], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -115,21 +126,21 @@ export const Emails = () => {
     // Phase 3: Progress Stepper Component
     const getProgressSteps = (email: any) => {
         const steps = [
-            { 
-                id: 'extracting', 
-                label: 'Extracting Specs', 
+            {
+                id: 'extracting',
+                label: 'Extracting Specs',
                 icon: FileText,
                 status: 'pending' as 'pending' | 'active' | 'completed'
             },
-            { 
-                id: 'matching', 
-                label: 'Matching SKUs', 
+            {
+                id: 'matching',
+                label: 'Matching SKUs',
                 icon: Search,
                 status: 'pending' as 'pending' | 'active' | 'completed'
             },
-            { 
-                id: 'ready', 
-                label: 'Ready for Review', 
+            {
+                id: 'ready',
+                label: 'Ready for Review',
                 icon: CheckCircle,
                 status: 'pending' as 'pending' | 'active' | 'completed'
             }
@@ -162,41 +173,55 @@ export const Emails = () => {
 
     const ProgressStepper = ({ email }: { email: any }) => {
         const steps = getProgressSteps(email);
-        
+
         return (
             <div className="flex items-center gap-2 py-2">
                 {steps.map((step, index) => {
                     const Icon = step.icon;
                     const isLast = index === steps.length - 1;
-                    
+
                     return (
                         <React.Fragment key={step.id}>
-                            <div className="flex flex-col items-center gap-1">
-                                <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors ${
-                                    step.status === 'completed' 
-                                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
+                            <div className="flex flex-col items-center gap-1.5">
+                                <div
+                                    className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-500 ease-out ${step.status === 'completed'
+                                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 scale-100'
                                         : step.status === 'active'
-                                        ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse'
-                                        : 'bg-slate-800/50 border-slate-600 text-slate-500'
-                                }`}>
-                                    <Icon size={14} />
+                                            ? 'bg-blue-500/20 border-blue-500 text-blue-400 scale-110 shadow-lg shadow-blue-500/20'
+                                            : 'bg-slate-800/50 border-slate-600 text-slate-500 scale-95 opacity-60'
+                                        }`}
+                                    style={{
+                                        animation: step.status === 'active' ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none'
+                                    }}
+                                >
+                                    <Icon size={18} className={step.status === 'active' ? 'animate-pulse' : ''} />
                                 </div>
-                                <span className={`text-xs font-medium ${
-                                    step.status === 'completed' 
-                                        ? 'text-emerald-400' 
-                                        : step.status === 'active'
-                                        ? 'text-blue-400'
+                                <span className={`text-xs font-medium transition-all duration-300 ${step.status === 'completed'
+                                    ? 'text-emerald-400'
+                                    : step.status === 'active'
+                                        ? 'text-blue-400 font-semibold'
                                         : 'text-slate-500'
-                                }`}>
+                                    }`}>
                                     {step.label}
                                 </span>
+                                {step.status === 'completed' && isLast && (
+                                    <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider animate-in fade-in slide-in-from-bottom-2">
+                                        Ready to Quote!
+                                    </span>
+                                )}
                             </div>
                             {!isLast && (
-                                <div className={`w-8 h-0.5 mx-1 transition-colors ${
-                                    step.status === 'completed' 
-                                        ? 'bg-emerald-500' 
-                                        : 'bg-slate-700'
-                                }`} />
+                                <div className="relative w-12 h-1 mx-1 overflow-hidden rounded-full bg-slate-700">
+                                    <div
+                                        className={`absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out ${step.status === 'completed' ? 'w-full' : 'w-0'
+                                            }`}
+                                    />
+                                    {step.status === 'active' && (
+                                        <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 animate-pulse"
+                                            style={{ width: '50%', animation: 'loading-bar 1.5s ease-in-out infinite' }}
+                                        />
+                                    )}
+                                </div>
                             )}
                         </React.Fragment>
                     );
@@ -217,15 +242,50 @@ export const Emails = () => {
                         <button
                             key={status}
                             onClick={() => setStatusFilter(status)}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
-                                statusFilter === status
-                                    ? 'bg-slate-800 text-slate-200 border-slate-700'
-                                    : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-100'
-                            }`}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${statusFilter === status
+                                ? 'bg-slate-800 text-slate-200 border-slate-700'
+                                : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-100'
+                                }`}
                         >
                             {status === '' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
                         </button>
                     ))}
+                </div>
+            </div>
+
+            {/* Dedicated Inbound Banner */}
+            <div className="bg-gradient-to-r from-orange-600/20 to-orange-500/5 border border-orange-500/20 rounded-2xl p-6 mb-6">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="flex items-start gap-4">
+                        <div className="p-3 bg-orange-500 rounded-xl text-white shadow-lg shadow-orange-500/20">
+                            <Sparkles size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-white mb-1">Dedicated Email Inbound</h2>
+                            <p className="text-slate-300 text-sm max-w-md">
+                                Forward your customer RFQs directly to this address. Our AI will automatically extract details, deadlines, and populate your inbox.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex flex-col items-center md:items-end gap-2">
+                        <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700 px-4 py-3 rounded-xl">
+                            <code className="text-orange-400 font-mono font-bold">
+                                requests@{org?.slug || 'yourcompany'}.mercura.io
+                            </code>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(`requests@${org?.slug || 'yourcompany'}.mercura.io`);
+                                    alert('Copied to clipboard!');
+                                }}
+                                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                            >
+                                <Copy size={16} />
+                            </button>
+                        </div>
+                        <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+                            Active & Ready for Intake
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -259,7 +319,7 @@ export const Emails = () => {
                                 emails.map((email) => {
                                     const quotes = emailQuotes[email.id] || [];
                                     const hasQuotes = quotes.length > 0;
-                                    
+
                                     return (
                                         <React.Fragment key={email.id}>
                                             <tr className="group hover:bg-slate-800/30 transition-colors">
@@ -358,11 +418,10 @@ export const Emails = () => {
                                                                     <div className="flex-1">
                                                                         <div className="flex items-center gap-3 mb-1">
                                                                             <span className="text-sm font-medium text-white">{quote.quote_number}</span>
-                                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                                                                quote.status === 'draft' ? 'bg-amber-500/10 text-amber-400' :
+                                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${quote.status === 'draft' ? 'bg-amber-500/10 text-amber-400' :
                                                                                 quote.status === 'sent' ? 'bg-blue-500/10 text-blue-400' :
-                                                                                'bg-slate-500/10 text-slate-400'
-                                                                            }`}>
+                                                                                    'bg-slate-500/10 text-slate-400'
+                                                                                }`}>
                                                                                 {quote.status.replace('_', ' ')}
                                                                             </span>
                                                                         </div>

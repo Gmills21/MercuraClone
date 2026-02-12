@@ -4,7 +4,7 @@ Quotes API routes using local SQLite.
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import uuid
 
@@ -29,6 +29,8 @@ class QuoteItemCreate(BaseModel):
 
 class QuoteCreate(BaseModel):
     customer_id: str
+    project_id: Optional[str] = None
+    assignee_id: Optional[str] = None
     items: List[QuoteItemCreate]
     tax_rate: float = 0.0
     notes: Optional[str] = None
@@ -50,6 +52,11 @@ class QuoteItemResponse(BaseModel):
 class QuoteResponse(BaseModel):
     id: str
     customer_id: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    customer_name: Optional[str] = None
+    assigned_user_id: Optional[str] = None
+    assignee_name: Optional[str] = None
     status: str
     items: List[QuoteItemResponse]
     subtotal: float
@@ -107,6 +114,8 @@ async def create_quote_endpoint(
         "id": quote_id,
         "organization_id": org_id,
         "customer_id": quote.customer_id,
+        "project_id": quote.project_id,
+        "assigned_user_id": quote.assignee_id,
         "status": "draft",
         "subtotal": subtotal,
         "tax_rate": quote.tax_rate,
@@ -170,3 +179,48 @@ async def get_quote_by_token_endpoint(token: str):
     if quote:
         return QuoteResponse(**quote)
     raise HTTPException(status_code=404, detail="Quote not found")
+
+
+@router.get("/email/{email_id}", response_model=Dict[str, List[QuoteResponse]])
+async def get_quotes_by_email_endpoint(
+    email_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
+    """Get quotes created from a specific email."""
+    user_id, org_id = user_org
+    from app.database_sqlite import get_quotes_by_email
+    quotes = get_quotes_by_email(email_id, organization_id=org_id)
+    
+    # Map to QuoteResponse
+    results = [QuoteResponse(**q) for q in quotes]
+    return {"quotes": results}
+
+
+class QuoteUpdate(BaseModel):
+    status: Optional[str] = None
+    assignee_id: Optional[str] = None
+    notes: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+@router.patch("/{quote_id}", response_model=QuoteResponse)
+async def update_quote_endpoint(
+    quote_id: str,
+    updates: QuoteUpdate,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
+    """Update a quote."""
+    user_id, org_id = user_org
+    from app.database_sqlite import update_quote
+    
+    # Map assignee_id to assigned_user_id for DB
+    db_updates = updates.dict(exclude_unset=True)
+    if "assignee_id" in db_updates:
+        db_updates["assigned_user_id"] = db_updates.pop("assignee_id")
+        
+    success = update_quote(quote_id, db_updates, organization_id=org_id)
+    if success:
+        result = get_quote_with_items(quote_id, organization_id=org_id)
+        return QuoteResponse(**result)
+    
+    raise HTTPException(status_code=404, detail="Quote not found or update failed")

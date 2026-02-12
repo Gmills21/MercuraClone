@@ -13,35 +13,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/data", tags=["data"])
 
 
+from app.database_sqlite import list_emails, get_user_by_id
+from app.middleware.organization import get_current_user_and_org
+from fastapi import Depends
+
 @router.get("/emails")
 async def get_emails(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(default=50, le=100),
-    offset: int = Query(default=0, ge=0)
+    offset: int = Query(default=0, ge=0),
+    user_org: tuple = Depends(get_current_user_and_org)
 ):
     """
     Get list of inbound emails.
-    Note: Email ingestion requires configuration. Returns empty list for now.
     """
-    # Return empty response - email ingestion not implemented in SQLite version
+    user_id, org_id = user_org
+    emails = list_emails(organization_id=org_id, status=status, limit=limit, offset=offset)
+    
     return {
-        "emails": [],
-        "count": 0,
+        "emails": emails,
+        "count": len(emails),
         "limit": limit,
-        "offset": offset,
-        "message": "Email ingestion not configured. Connect your email provider to see inbound emails."
+        "offset": offset
     }
 
 
 @router.get("/emails/{email_id}")
-async def get_email_details(email_id: str):
+async def get_email_details(
+    email_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get detailed information about a specific email.
     """
-    raise HTTPException(
-        status_code=404, 
-        detail="Email not found. Email ingestion feature not configured."
-    )
+    user_id, org_id = user_org
+    from app.database_sqlite import get_db
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM inbound_emails WHERE id = ? AND organization_id = ?", (email_id, org_id))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Email not found")
+        
+        import json
+        data = dict(row)
+        data["metadata"] = json.loads(data.get("metadata", "{}"))
+        return data
 
 
 @router.get("/line-items")

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Mock User ID for "Sales-Ready MVP" since we don't have full auth yet
 // In a real app, this would come from AuthContext
@@ -23,6 +23,7 @@ export const quotesApi = {
     get: (id: string) => api.get(`/quotes/${id}`),
     create: (data: any) => api.post('/quotes/', data),
     update: (id: string, data: any) => api.put(`/quotes/${id}`, data),
+    patchUpdate: (id: string, data: any) => api.patch(`/quotes/${id}`, data),
     updateStatus: (id: string, status: string) => api.patch(`/quotes/${id}/status?status=${status}`),
 };
 
@@ -49,11 +50,20 @@ export const productsApi = {
     },
     suggest: (items: any[]) => api.post('/products/suggest', { items }),
     chat: (query: string) => api.post('/products/chat', { query }),
+    create: (data: any) => api.post('/products/', data),
 };
 
 export const customersApi = {
     list: (limit = 100) => api.get(`/customers?limit=${limit}`),
     create: (data: any) => api.post('/customers/', data),
+};
+
+export const projectsApi = {
+    list: (limit = 100) => api.get(`/projects?limit=${limit}`),
+    get: (id: string) => api.get(`/projects/${id}`),
+    create: (data: any) => api.post('/projects/', data),
+    update: (id: string, data: any) => api.patch(`/projects/${id}`, data),
+    getQuotes: (id: string) => api.get(`/projects/${id}/quotes`),
 };
 
 export const emailsApi = {
@@ -151,4 +161,9 @@ export const billingApi = {
 
 export const quickbooksApi = {
     exportQuote: (quoteId: string) => api.post(`/quickbooks/export-quote?quote_id=${quoteId}`),
+};
+
+export const organizationsApi = {
+    getMe: () => api.get('/organizations/me'),
+    getMembers: (orgId: string) => api.get(`/organizations/${orgId}/members`),
 };

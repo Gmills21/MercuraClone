@@ -48,7 +48,9 @@ except ImportError:
 
 # Import our new multi-provider AI service
 from app.ai_provider_service import get_ai_service, extract_structured_data
-
+from app.services.langextract.docling_parser import DoclingParser
+from app.posthog_utils import capture_event
+import time
 import os
 
 
@@ -70,7 +72,8 @@ class ExtractionEngine:
         self.ai_service = get_ai_service()
         self.ai_provider = "multi-provider"
         self.ai_model = "auto-rotated"
-        logger.info("Extraction engine initialized with MultiProviderAIService")
+        self.docling_parser = DoclingParser()
+        logger.info("Extraction engine initialized with MultiProviderAIService and Docling")
     
     async def extract_from_text(self, text: str, source_type: str = "email") -> Dict[str, Any]:
         """
@@ -162,6 +165,39 @@ class ExtractionEngine:
         """Extract RFQ data from PDF document."""
         logger.info(f"Extracting from PDF: {filename}")
         
+        # Try Docling first (Best for complex layouts)
+        try:
+            if self.docling_parser.converter:
+                logger.info("Attempting Docling extraction...")
+                # Docling takes a file path or Path object, or InputDocument. 
+                # For byte stream, we wrap in BytesIO and it usually auto-detects.
+                # However, providing a filename helps.
+                from docling.datamodel.base_models import InputFormat
+                from docling.document_converter import DocumentConverter
+                
+                # Check if we can pass BytesIO directly to my wrapper
+                markdown_text = self.docling_parser.parse(io.BytesIO(pdf_data), filename_hint=filename)
+                
+                if markdown_text and len(markdown_text) > 50:
+                    logger.info("Docling extraction successful")
+                    
+                    # AI Parse with structured context
+                    structured_data = await self._parse_with_ai(markdown_text, "pdf_docling")
+                    cleaned_data = self._clean_extraction(structured_data)
+                    confidence = self._calculate_confidence(cleaned_data, has_ocr=False)
+                    
+                    return {
+                        "success": True,
+                        "source": "pdf",
+                        "filename": filename,
+                        "full_text": markdown_text[:5000], # Store more text as MD is compact
+                        "structured_data": cleaned_data,
+                        "confidence": confidence + 0.15, # Bonus for Docling structure
+                        "extraction_method": "docling_ai"
+                    }
+        except Exception as e:
+            logger.warning(f"Docling extraction failed, falling back to legacy parsers: {e}")
+
         if not PDF_AVAILABLE:
             return self._empty_result("PDF extraction libraries not available")
             
@@ -205,6 +241,44 @@ class ExtractionEngine:
             logger.error(f"PDF extraction failed: {e}")
             return self._empty_result(f"PDF Extraction failed: {str(e)}")
 
+    async def extract_from_document(self, file_data: bytes, filename: str) -> Dict[str, Any]:
+        """
+        Universal document extraction using Docling.
+        Supports DOCX, PPTX, HTML, AsciiDoc, etc.
+        """
+        logger.info(f"Extracting from document: {filename}")
+        
+        try:
+            if self.docling_parser.converter:
+                logger.info(f"Using Docling for document: {filename}")
+                
+                # Pass file_data and filename hint to the parser
+                markdown_text = self.docling_parser.parse(io.BytesIO(file_data), filename_hint=filename)
+                
+                if markdown_text and len(markdown_text) > 10:
+                    logger.info("Docling document extraction successful")
+                    
+                    # AI Parse
+                    structured_data = await self._parse_with_ai(markdown_text, f"docling_{filename.split('.')[-1]}")
+                    cleaned_data = self._clean_extraction(structured_data)
+                    confidence = self._calculate_confidence(cleaned_data, has_ocr=False)
+                    
+                    return {
+                        "success": True,
+                        "source": "document",
+                        "filename": filename,
+                        "full_text": markdown_text[:5000],
+                        "structured_data": cleaned_data,
+                        "confidence": confidence,
+                        "extraction_method": "docling_ai"
+                    }
+            
+            return self._empty_result(f"Docling not available for document: {filename}")
+            
+        except Exception as e:
+            logger.error(f"Document extraction failed: {e}")
+            return self._empty_result(f"Document extraction failed: {str(e)}")
+
     async def extract_from_xlsx(self, file_data: bytes, filename: str) -> Dict[str, Any]:
         """Extract RFQ data from Excel/CSV."""
         logger.info(f"Extracting from Spreadsheet: {filename}")
@@ -244,25 +318,64 @@ class ExtractionEngine:
                      text: Optional[str] = None,
                      file_data: Optional[bytes] = None,
                      filename: Optional[str] = None,
-                     source_type: str = "unknown") -> Dict[str, Any]:
+                     source_type: str = "unknown",
+                     user_id: str = "anonymous") -> Dict[str, Any]:
         """
         Universal extraction method - handles text, image, PDF, Excel
         """
+        start_time = time.time()
+        
+        # Track request received
+        capture_event(
+            distinct_id=user_id,
+            event_name="receive_request",
+            properties={
+                "source_type": source_type,
+                "filename": filename,
+                "is_file": bool(file_data),
+                "extension": filename.lower().split('.')[-1] if filename else None
+            }
+        )
+        
+        result = None
         if file_data and filename:
             ext = filename.lower().split('.')[-1]
             if ext in ['pdf']:
-                return await self.extract_from_pdf(file_data, filename)
+                result = await self.extract_from_pdf(file_data, filename)
             elif ext in ['xlsx', 'xls', 'csv']:
-                return await self.extract_from_xlsx(file_data, filename)
+                result = await self.extract_from_xlsx(file_data, filename)
+            elif ext in ['docx', 'pptx', 'html', 'htm', 'md', 'txt']:
+                result = await self.extract_from_document(file_data, filename)
             elif ext in ['jpg', 'jpeg', 'png', 'webp']:
-                return await self.extract_from_image(file_data, filename)
+                result = await self.extract_from_image(file_data, filename)
             else:
-                # Fallback to OCR if it's an unrecognized file that might be an image
-                return await self.extract_from_image(file_data, filename)
+                # If Docling is available, let it try unknown formats first
+                if self.docling_parser.converter:
+                    result = await self.extract_from_document(file_data, filename)
+                else:
+                    # Fallback to OCR if it's an unrecognized file that might be an image
+                    result = await self.extract_from_image(file_data, filename)
         elif text:
-            return await self.extract_from_text(text, source_type)
+            result = await self.extract_from_text(text, source_type)
         else:
-            return self._empty_result("No text or file provided")
+            result = self._empty_result("No text or file provided")
+            
+        duration = time.time() - start_time
+        
+        # Track processing time and success
+        capture_event(
+            distinct_id=user_id,
+            event_name="extraction_processed",
+            properties={
+                "processing_time_sec": round(duration, 3),
+                "success": result.get("success", False),
+                "method": result.get("extraction_method"),
+                "confidence": result.get("confidence", 0.0),
+                "line_item_count": len(result.get("structured_data", {}).get("line_items", []))
+            }
+        )
+        
+        return result
     
     async def _run_ocr(self, image_data: bytes) -> str:
         """Run OCR on image data."""
@@ -287,56 +400,110 @@ class ExtractionEngine:
         return pytesseract.image_to_string(image)
     
     async def _parse_with_ai(self, text: str, source_type: str) -> Dict[str, Any]:
-        """Parse structured data from text using multi-provider AI service."""
+        """Parse structured data from text using LangExtract with source grounding."""
+        from app.services.langextract import extract, visualize
         
-        schema = {
-            "customer_name": "string - Company/organization name ONLY",
-            "contact_email": "string - Email if found",
-            "contact_phone": "string - Phone if found",
-            "line_items": [
-                {
-                    "item_name": "string - Full product description",
-                    "quantity": "number",
-                    "sku": "string - Product code if found",
-                    "unit": "string - units, pcs, etc"
-                }
-            ],
-            "delivery_date": "string - Requested delivery date",
-            "delivery_location": "string - Delivery address",
-            "special_instructions": "string - Notes about document type",
-            "confidence": "number 0.0-1.0"
-        }
+        prompt_description = """
+        Extract the following entities from the Request for Quote (RFQ):
+        - customer_name: The company or person requesting the quote.
+        - contact_email: Email address of the requester.
+        - contact_phone: Phone number of the requester.
+        - delivery_date: Requested delivery date.
+        - delivery_location: Delivery address.
+        - special_instructions: Any special notes.
+        - line_item_quantity: The quantity for a line item (e.g., 50).
+        - line_item_unit: The unit of measure (pcs, ea, etc).
+        - line_item_sku: The part number or SKU.
+        - line_item_description: The description of the product.
         
-        instructions = """You are a specialized Procurement AI. Your job is to extract RFQ data ONLY if this is a quote request.
-
-STRICT "ZERO-ERROR" CLASSIFICATION:
-1. FIRST, determine if this is a "Request for Quote" (RFQ) or a "Spec Sheet/Brochure".
-   - RFQ: Contains "Please quote", "I need", "Qty:", "Quantity", or specific order amounts.
-   - SPEC SHEET: Informational text, "Overview", "Features", numbered lists of product types (e.g., "1. Type A", "2. Type B").
-   - IF SPEC SHEET: Return "line_items": [] and set "special_instructions": "Document appears to be a Spec Sheet, not an RFQ."
-
-2. QUANTITY RULES (CRITICAL):
-   - IGNORE numbered lists (e.g., "1. Feature X" -> This is NOT Quantity 1).
-   - IGNORE technical specs (e.g., "150 PSI", "3000 PSI", "Class 300").
-   - Quantity must be an EXPLICIT request (e.g., "50 pcs", "Qty 5", "10x").
-   - If a line says "Ball Valve" with NO explicit quantity, check context. If it's a header in a spec sheet, IGNORE IT."""
-
+        Rules:
+        - Only extract if this is a quote request.
+        - For line items, extract each component separately but keep them associated with the line text.
+        """
+        
         try:
-            result = await extract_structured_data(
-                text=text[:3000],
-                schema=schema,
-                instructions=instructions,
-                preferred_provider=None  # Allow automatic provider selection
+            # 1. Run LangExtract
+            result = await extract(
+                text_or_documents=text,  # No limit, let Gemini handle large context
+                prompt_description=prompt_description
             )
             
-            if result["success"]:
-                return result["data"]
-            else:
-                logger.warning(f"AI extraction failed: {result.get('error')}. Falling back to basic parsing.")
-                return self._basic_parse(text)
+            # 2. Generate visualization HTML
+            visualization_html = visualize(result)
+            
+            # 3. Post-process extractions into structured data
+            data = {
+                "customer_name": None,
+                "contact_email": None,
+                "contact_phone": None,
+                "line_items": [],
+                "delivery_date": None,
+                "delivery_location": None,
+                "special_instructions": None,
+                "visualization_html": visualization_html
+            }
+            
+            # Helper to get extraction text
+            def get_text(cls_name):
+                return next((e.extraction_text for e in result.extractions if e.extraction_class == cls_name), None)
+            
+            data["customer_name"] = get_text("customer_name")
+            data["contact_email"] = get_text("contact_email")
+            data["contact_phone"] = get_text("contact_phone")
+            data["delivery_date"] = get_text("delivery_date")
+            data["delivery_location"] = get_text("delivery_location")
+            data["special_instructions"] = get_text("special_instructions")
+            
+            # Group line items by line number (using source_start_char)
+            # We assume items on the same line belong together
+            line_items_map = {}
+            
+            for ext in result.extractions:
+                if not ext.extraction_class.startswith("line_item_"):
+                    continue
+                
+                # Determine line number
+                # Simple approximation: count newlines before start char
+                if ext.source_start_char is not None:
+                    line_num = text.count('\n', 0, ext.source_start_char)
+                else:
+                    line_num = -1 # fallback group
+                
+                if line_num not in line_items_map:
+                    line_items_map[line_num] = {}
+                
+                # Map class to field name
+                # line_item_quantity -> quantity
+                field = ext.extraction_class.replace("line_item_", "")
+                if field == "description": field = "item_name" # Map description to item_name per schema
+                
+                # Store value
+                if field in ["quantity"]:
+                    # Try to parse number
+                    import re
+                    nums = re.findall(r'\d+', ext.extraction_text)
+                    if nums:
+                        line_items_map[line_num][field] = int(nums[0])
+                    else:
+                        line_items_map[line_num][field] = 1
+                else:
+                    line_items_map[line_num][field] = ext.extraction_text
+
+            # Convert map to list
+            for line_num, item_data in sorted(line_items_map.items()):
+                if "item_name" in item_data or "sku" in item_data: # Filter valid items
+                    data["line_items"].append({
+                        "item_name": item_data.get("item_name", "Unknown Item"),
+                        "quantity": item_data.get("quantity", 1),
+                        "sku": item_data.get("sku"),
+                        "unit": item_data.get("unit", "pcs"),
+                        "notes": f"Line {line_num+1}" if line_num >= 0 else None
+                    })
+            
+            return data
                 
         except Exception as e:
-            logger.error(f"AI parsing failed: {e}")
+            logger.error(f"LangExtract parsing failed: {e}")
             return self._basic_parse(text)
     
     def _basic_parse(self, text: str) -> Dict[str, Any]:
@@ -435,7 +602,8 @@ STRICT "ZERO-ERROR" CLASSIFICATION:
             "line_items": [],
             "delivery_date": self._clean_date(data.get("delivery_date")),
             "delivery_location": self._clean_string(data.get("delivery_location")),
-            "special_instructions": self._clean_string(data.get("special_instructions"))
+            "special_instructions": self._clean_string(data.get("special_instructions")),
+            "visualization_html": data.get("visualization_html")  # Pass through HTML
         }
         
         # Clean line items

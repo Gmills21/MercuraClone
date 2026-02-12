@@ -11,6 +11,7 @@ import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import httpx
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,12 @@ class PaddleService:
     
     def __init__(self):
         """Initialize Paddle service with API credentials."""
-        self.vendor_id = os.getenv("PADDLE_VENDOR_ID")
-        self.vendor_auth_code = os.getenv("PADDLE_VENDOR_AUTH_CODE")
-        self.public_key = os.getenv("PADDLE_PUBLIC_KEY")
-        self.webhook_secret = os.getenv("PADDLE_WEBHOOK_SECRET")
+        self.vendor_id = settings.paddle_vendor_id or os.getenv("PADDLE_VENDOR_ID")
+        self.vendor_auth_code = settings.paddle_api_key or os.getenv("PADDLE_API_KEY")
+        self.webhook_secret = settings.paddle_webhook_secret or os.getenv("PADDLE_WEBHOOK_SECRET")
+        self.sandbox = settings.paddle_sandbox or os.getenv("PADDLE_SANDBOX", "true").lower() == "true"
         
         # Paddle API endpoints
-        self.sandbox = os.getenv("PADDLE_SANDBOX", "true").lower() == "true"
         if self.sandbox:
             self.api_url = "https://sandbox-api.paddle.com"
             self.checkout_url = "https://sandbox-checkout.paddle.com"

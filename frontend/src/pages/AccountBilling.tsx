@@ -14,6 +14,7 @@ interface SubscriptionPlan {
     billing_interval: 'monthly' | 'yearly';
     features: string[];
     max_seats: number | null;
+    paddle_plan_id?: string;
 }
 
 interface Subscription {

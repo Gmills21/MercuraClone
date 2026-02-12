@@ -60,6 +60,8 @@ from app.routes import billing
 from app.routes import organizations
 from app.routes import data
 from app.routes import ai_service
+from app.routes import projects
+from app.routes import email_ingestion
 
 # Create FastAPI app
 app = FastAPI(
@@ -103,6 +105,8 @@ app.include_router(billing.router)  # B2B subscription management
 app.include_router(organizations.router)  # Organization/team management
 app.include_router(data.router)  # Data/emails endpoints
 app.include_router(ai_service.router)  # AI service management
+app.include_router(projects.router)  # Industrial Projects grouping
+app.include_router(email_ingestion.router)
 
 # Serve frontend static files
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

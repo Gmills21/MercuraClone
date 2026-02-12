@@ -10,7 +10,7 @@ export const QuoteView = () => {
     const [error, setError] = useState<string | null>(null);
     const [confirming, setConfirming] = useState(false);
     const [confirmed, setConfirmed] = useState(false);
-    
+
     // Form state for confirmation
     const [customerName, setCustomerName] = useState('');
     const [customerEmail, setCustomerEmail] = useState('');
@@ -45,7 +45,7 @@ export const QuoteView = () => {
 
     const handleConfirm = async () => {
         if (!token) return;
-        
+
         if (!customerName.trim() || !customerEmail.trim()) {
             alert('Please provide your name and email address.');
             return;
@@ -95,7 +95,7 @@ export const QuoteView = () => {
         return null;
     }
 
-    const totalAmount = quote.items?.reduce((sum: number, item: any) => 
+    const totalAmount = quote.items?.reduce((sum: number, item: any) =>
         sum + (Number(item.quantity || 0) * Number(item.unit_price || 0)), 0
     ) || quote.total_amount || 0;
 
@@ -178,7 +178,12 @@ export const QuoteView = () => {
                             <tbody>
                                 {quote.items?.map((item: any, index: number) => (
                                     <tr key={index} className="border-b border-slate-800/50">
-                                        <td className="py-4 text-white">{item.description || 'N/A'}</td>
+                                        <td className="py-4 text-white">
+                                            <div
+                                                className="tiptap-content"
+                                                dangerouslySetInnerHTML={{ __html: item.description || 'N/A' }}
+                                            />
+                                        </td>
                                         <td className="py-4 text-slate-400 font-mono text-sm">{item.sku || 'N/A'}</td>
                                         <td className="py-4 text-slate-300 text-center">{item.quantity || 1}</td>
                                         <td className="py-4 text-slate-300 text-right">${Number(item.unit_price || 0).toFixed(2)}</td>
@@ -231,7 +236,7 @@ export const QuoteView = () => {
                         <p className="text-slate-400 mb-6">
                             Please provide your contact information to confirm this quote. Our sales team will process your order.
                         </p>
-                        
+
                         <div className="space-y-4 mb-6">
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -246,7 +251,7 @@ export const QuoteView = () => {
                                     required
                                 />
                             </div>
-                            
+
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
                                     Email <span className="text-red-400">*</span>
@@ -260,7 +265,7 @@ export const QuoteView = () => {
                                     required
                                 />
                             </div>
-                            
+
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
                                     Phone (Optional)
@@ -273,7 +278,7 @@ export const QuoteView = () => {
                                     placeholder="(555) 123-4567"
                                 />
                             </div>
-                            
+
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
                                     Additional Notes (Optional)
@@ -287,7 +292,7 @@ export const QuoteView = () => {
                                 />
                             </div>
                         </div>
-                        
+
                         <button
                             onClick={handleConfirm}
                             disabled={confirming || !customerName.trim() || !customerEmail.trim()}
@@ -305,7 +310,7 @@ export const QuoteView = () => {
                                 </>
                             )}
                         </button>
-                        
+
                         <p className="text-xs text-slate-500 text-center mt-4">
                             By confirming, you agree to proceed with this quote. Our sales team will contact you to finalize the order.
                         </p>

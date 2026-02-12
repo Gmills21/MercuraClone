@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Loader2, AlertCircle, CheckCircle2, TrendingUp, History, Package, ArrowRight, Send, Edit3 } from 'lucide-react';
-import { quotesApi, customersApi, productsApi, extractionsApi, api } from '../services/api';
+import { Sparkles, Loader2, AlertCircle, CheckCircle2, TrendingUp, History, Package, ArrowRight, Send, Edit3, PlusCircle, Check, Trash2, Plus, ListChecks, FileText, ChevronDown } from 'lucide-react';
+import { quotesApi, customersApi, productsApi, extractionsApi, api, projectsApi, organizationsApi } from '../services/api';
+import { SmartEditor } from '../components/ui/SmartEditor';
+import { trackEvent } from '../posthog';
 
 // Smart quote creation with AI extraction
 export const SmartQuote = () => {
@@ -13,11 +15,37 @@ export const SmartQuote = () => {
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerEmail, setNewCustomerEmail] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [extractedData, setExtractedData] = useState<any>(null);
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any>({});
   const [taxRate, setTaxRate] = useState(8.5);
   const [dragActive, setDragActive] = useState(false);
+  const [suggestedCustomer, setSuggestedCustomer] = useState<{ name: string; email?: string; phone?: string; company?: string } | null>(null);
+  const [showCustomerSuggestion, setShowCustomerSuggestion] = useState(false);
+  const [addingToCatalogId, setAddingToCatalogId] = useState<string | null>(null);
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProject, setSelectedProject] = useState<any>(null);
+  const [isNewProject, setIsNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectAddress, setNewProjectAddress] = useState('');
+  const [assignees, setAssignees] = useState<any[]>([]);
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>('');
+
+  // Manage object URL for file preview
+  useEffect(() => {
+    if (selectedFile) {
+      const url = URL.createObjectURL(selectedFile);
+      setFileUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setFileUrl(null);
+    }
+  }, [selectedFile]);
 
   // Load customers and products on mount
   useEffect(() => {
@@ -26,12 +54,25 @@ export const SmartQuote = () => {
 
   const loadData = async () => {
     try {
-      const [custRes, prodRes] = await Promise.all([
+      const [custRes, prodRes, projRes] = await Promise.all([
         customersApi.list(),
         productsApi.list(),
+        projectsApi.list(),
       ]);
       setCustomers(custRes.data || []);
       setProducts(prodRes.data || []);
+      setProjects(projRes.data || []);
+
+      // Load organization members for assignment
+      try {
+        const orgRes = await organizationsApi.getMe();
+        if (orgRes.data?.id) {
+          const membersRes = await organizationsApi.getMembers(orgRes.data.id);
+          setAssignees(membersRes.data.members || []);
+        }
+      } catch (err) {
+        console.error('Failed to load organization members:', err);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     }
@@ -66,7 +107,17 @@ export const SmartQuote = () => {
   const handleExtract = async () => {
     if (!inputText.trim() && !selectedFile) return;
 
+    // We now allow extraction without a customer selected to enable "Quick Add" detection
+    if (isNewCustomer && !newCustomerName.trim()) {
+      alert('Please enter a name for the new customer.');
+      return;
+    }
+
     setIsExtracting(true);
+    trackEvent('receive_request', {
+      source: selectedFile ? 'file' : 'text',
+      extension: selectedFile ? selectedFile.name.split('.').pop() : 'text'
+    });
     try {
       let res;
       if (selectedFile) {
@@ -84,6 +135,29 @@ export const SmartQuote = () => {
       const data = res.data;
       setExtractedData(data);
 
+      // --- AI Customer Suggestion Logic ---
+      const extractedCustomerName = data.structured_data?.customer_name;
+      if (extractedCustomerName && !selectedCustomer && !isNewCustomer) {
+        // Look for existing customer
+        const match = customers.find(c =>
+          c.name.toLowerCase().includes(extractedCustomerName.toLowerCase()) ||
+          (c.company && c.company.toLowerCase().includes(extractedCustomerName.toLowerCase()))
+        );
+
+        if (match) {
+          setSelectedCustomer(match);
+        } else {
+          setSuggestedCustomer({
+            name: extractedCustomerName,
+            email: data.structured_data?.contact_email,
+            phone: data.structured_data?.contact_phone,
+            company: extractedCustomerName // Often the same in initial extraction
+          });
+          setShowCustomerSuggestion(true);
+        }
+      }
+      // ------------------------------------
+
       // The unified endpoint returns structured_data directly
       const parsedItems = data.structured_data?.line_items || [];
 
@@ -91,7 +165,7 @@ export const SmartQuote = () => {
       const smartItems = await matchItemsIntelligently(
         parsedItems,
         products,
-        selectedCustomer
+        selectedCustomer || (isNewCustomer ? { name: newCustomerName } : null) || (extractedCustomerName ? { name: extractedCustomerName } : null)
       );
 
       setLineItems(smartItems);
@@ -225,14 +299,43 @@ export const SmartQuote = () => {
 
   // Send quote
   const handleSendQuote = async () => {
-    if (!selectedCustomer || lineItems.length === 0) return;
+    if ((!selectedCustomer && !isNewCustomer) || lineItems.length === 0) return;
 
     setStep('sending');
     try {
+      let finalCustomer = selectedCustomer;
+
+      if (isNewCustomer) {
+        // Create the new customer on-the-fly
+        const custRes = await customersApi.create({
+          name: newCustomerName,
+          company: newCustomerName, // Default company name to same as person name for now
+          email: newCustomerEmail || undefined,
+          phone: newCustomerPhone || undefined,
+        });
+        finalCustomer = custRes.data;
+        trackEvent('new_customer_created_inline', {
+          customer_name: newCustomerName,
+          has_email: !!newCustomerEmail,
+          has_phone: !!newCustomerPhone
+        });
+      }
+
+      let finalProject = selectedProject;
+      if (isNewProject && newProjectName.trim()) {
+        const projRes = await projectsApi.create({
+          name: newProjectName,
+          address: newProjectAddress || undefined,
+        });
+        finalProject = projRes.data;
+      }
+
       const { subtotal, taxAmount, total } = calculateTotals();
 
       const quoteData = {
-        customer_id: selectedCustomer.id,
+        customer_id: finalCustomer.id,
+        project_id: finalProject?.id,
+        assignee_id: selectedAssigneeId || undefined,
         items: lineItems.map(item => ({
           product_id: item.product?.id,
           product_name: item.name,
@@ -246,6 +349,14 @@ export const SmartQuote = () => {
       };
 
       const res = await quotesApi.create(quoteData);
+
+      trackEvent('quote_created', {
+        quote_id: res.data.id,
+        item_count: lineItems.length,
+        total_amount: total,
+        source: selectedFile ? 'file' : 'text',
+        is_new_customer: isNewCustomer
+      });
 
       // Track time saved from using Smart Quote
       try {
@@ -263,55 +374,75 @@ export const SmartQuote = () => {
     }
   };
 
+  // Add item to catalog on-the-fly
+  const handleAddToCatalog = async (item: any) => {
+    setAddingToCatalogId(item.id);
+    try {
+      // Enrichment: use price if extracted, otherwise use suggestedPrice
+      const initialPrice = item.unit_price || item.insights.basePrice || 0;
+
+      const productData = {
+        sku: item.sku || `SKU-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        name: item.name,
+        description: item.description || `Auto-extracted from RFQ: ${item.extracted_name}`,
+        price: initialPrice,
+        cost: item.cost || (initialPrice * 0.7),
+        category: 'Extracted'
+      };
+
+      const res = await productsApi.create(productData);
+      const newProduct = res.data;
+
+      // Update the line item with the new product
+      setLineItems(items =>
+        items.map(i => {
+          if (i.id === item.id) {
+            return {
+              ...i,
+              product: newProduct,
+              sku: newProduct.sku,
+              // Clear alerts about product not found
+              insights: {
+                ...i.insights,
+                alerts: i.insights.alerts.filter((a: any) => a.type !== 'warning')
+              }
+            };
+          }
+          return i;
+        })
+      );
+
+      // Refresh products list in background
+      loadData();
+    } catch (error) {
+      console.error('Failed to add to catalog:', error);
+      alert('Failed to add product to catalog. SKU might already exist.');
+    } finally {
+      setAddingToCatalogId(null);
+    }
+  };
+
   const { subtotal, taxAmount, total } = calculateTotals();
 
-  // STEP 1: INPUT
+  // STEP 1: INPUT - Upload/Import FIRST, Linear/Vercel Design
   if (step === 'input') {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-3xl mx-auto px-8 py-6">
-            <h1 className="text-2xl font-semibold text-gray-900">Create Smart Quote</h1>
-            <p className="text-gray-600 mt-1">Upload an RFQ PDF, spreadsheet, or paste the request details below</p>
+      <div className="min-h-screen bg-slate-50">
+        {/* Header with tech grid background */}
+        <div className="relative bg-white border-b border-slate-200/60 overflow-hidden">
+          <div className="absolute inset-0 tech-grid opacity-40" />
+          <div className="relative max-w-5xl mx-auto px-12 py-10">
+            <h1 className="text-3xl font-bold text-slate-950 tracking-tighter">New Request</h1>
+            <p className="text-slate-500 mt-2 text-lg">Start a new quote by uploading a file, pasting text, or forwarding an email.</p>
           </div>
         </div>
 
-        <div className="max-w-3xl mx-auto px-8 py-8">
-          {/* Customer Selection */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Customer
-            </label>
-            <select
-              value={selectedCustomer?.id || ''}
-              onChange={(e) => {
-                const cust = customers.find(c => c.id === e.target.value);
-                setSelectedCustomer(cust);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-            >
-              <option value="">Select a customer...</option>
-              {customers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+        <div className="max-w-5xl mx-auto px-12 py-12">
 
-          {/* Input Methods */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Sparkles className="text-orange-500" size={20} />
-              <h2 className="text-lg font-semibold text-gray-900">Import RFQ Document</h2>
-            </div>
-
-            <p className="text-gray-600 mb-6">
-              Upload a PDF, Excel sheet, or technical spec to automatically extract products and quantities.
-            </p>
-
-            {/* File Upload Zone */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+            {/* OPTION 1: Upload File */}
             <div
-              className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer mb-8 ${dragActive ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-orange-300'
-                } ${selectedFile ? 'bg-green-50 border-green-200' : ''}`}
+              className={`bento-card border-2 border-dashed p-8 flex flex-col items-center text-center cursor-pointer transition-all hover:-translate-y-1 ${dragActive || selectedFile ? 'border-orange-500 bg-orange-50/50' : 'border-slate-200/60'}`}
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
@@ -325,93 +456,109 @@ export const SmartQuote = () => {
                 onChange={handleFileChange}
                 accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp"
               />
+              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-5 shadow-soft">
+                <Package size={26} />
+              </div>
+              <h3 className="font-semibold text-slate-950 mb-1 tracking-tight">Upload File</h3>
+              <p className="text-sm text-slate-500 mb-5">PDF, Excel, CSV, or Images</p>
 
               {selectedFile ? (
-                <div className="flex flex-col items-center">
-                  <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-3">
-                    <CheckCircle2 size={24} />
+                <div className="w-full bg-white border-minimal rounded-xl p-4 flex items-center gap-3 shadow-soft">
+                  <div className="bg-emerald-100 text-emerald-600 p-2 rounded-xl">
+                    <CheckCircle2 size={18} />
                   </div>
-                  <h3 className="font-medium text-gray-900">{selectedFile.name}</h3>
-                  <p className="text-sm text-gray-500 mt-1">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB • Ready for extraction</p>
+                  <div className="flex-1 text-left overflow-hidden">
+                    <p className="text-sm font-semibold text-slate-950 truncate">{selectedFile.name}</p>
+                    <p className="text-xs text-slate-500">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                  </div>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedFile(null);
-                    }}
-                    className="mt-4 text-xs text-red-600 hover:text-red-800 font-medium"
+                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                    className="text-slate-400 hover:text-red-500 transition-colors"
                   >
-                    Remove File
+                    <Trash2 size={18} />
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col items-center text-gray-500">
-                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                    <Package size={24} />
-                  </div>
-                  <p className="text-sm">
-                    <span className="font-semibold text-orange-600">Click to upload</span> or drag and drop
-                  </p>
-                  <p className="text-xs mt-1">PDF, XLSX, CSV, or Image (Max 20MB)</p>
-                </div>
+                <button className="px-5 py-2.5 bg-white border-minimal rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-soft transition-all">
+                  Select File
+                </button>
               )}
             </div>
 
-            <div className="relative flex items-center mb-8">
-              <div className="flex-grow border-t border-gray-200"></div>
-              <span className="flex-shrink mx-4 text-gray-400 text-sm font-medium">OR PASTE TEXT</span>
-              <div className="flex-grow border-t border-gray-200"></div>
+            {/* OPTION 2: Paste Text */}
+            <div className="bento-card p-8 flex flex-col md:col-span-1 relative overflow-hidden transition-all hover:-translate-y-1">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-11 h-11 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center shadow-soft">
+                  <FileText size={22} />
+                </div>
+                <h3 className="font-semibold text-slate-950 tracking-tight">Paste Text</h3>
+              </div>
+              <SmartEditor
+                content={inputText}
+                onChange={setInputText}
+                placeholder="Paste RFQ content here..."
+                className="flex-1 w-full"
+                minHeight="150px"
+              />
             </div>
 
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              disabled={!!selectedFile}
-              placeholder={selectedFile ? "File selected. Clear it to paste text instead." : `Example:
-"Hi, need a quote for:
-- 25x Industrial Widget Standard (SKU: WIDGET-001)
-- 10x Heavy Duty Gadget (SKU: GADGET-001)
-...`}
-              rows={6}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 font-mono text-sm mb-4 disabled:bg-gray-50 disabled:opacity-50"
-            />
-
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-gray-500">
-                💡 <strong>Tip:</strong> AI handles multi-page technical RFQs and Spec Sheets
+            {/* OPTION 3: Email Forwarding */}
+            <div className="bento-card p-8 flex flex-col relative overflow-hidden transition-all hover:-translate-y-1">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-11 h-11 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center shadow-soft">
+                  <Send size={22} />
+                </div>
+                <h3 className="font-semibold text-slate-950 tracking-tight">Forward Email</h3>
               </div>
-              <button
-                onClick={handleExtract}
-                disabled={(!inputText.trim() && !selectedFile) || !selectedCustomer || isExtracting}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isExtracting ? (
-                  <>
-                    <Loader2 className="animate-spin" size={18} />
-                    Extracting...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={18} />
-                    Extract & Quote
-                  </>
-                )}
-              </button>
+              <p className="text-sm text-slate-500 mb-5">
+                Forward any RFQ email to your dedicated AI inbox to auto-create a request.
+              </p>
+              <div className="mt-auto bg-slate-50 border-minimal rounded-xl p-4 flex items-center justify-between gap-2">
+                <code className="text-xs font-mono text-slate-700 truncate">quotes@mercura.ai</code>
+                <button
+                  onClick={() => navigator.clipboard.writeText('quotes@mercura.ai')}
+                  className="text-slate-400 hover:text-orange-600 transition-colors"
+                  title="Copy email"
+                >
+                  <CheckCircle2 size={18} />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Quick Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-semibold text-blue-700">{customers.length}</div>
-              <div className="text-sm text-blue-600">Customers</div>
+          <div className="flex justify-end mb-12">
+            <button
+              onClick={handleExtract}
+              disabled={(!inputText.trim() && !selectedFile) || isExtracting}
+              className="inline-flex items-center gap-2.5 px-10 py-5 bg-slate-950 text-white font-bold text-lg rounded-2xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-soft-lg hover:-translate-y-0.5"
+            >
+              {isExtracting ? (
+                <>
+                  <Loader2 className="animate-spin" size={22} />
+                  Extracting Data...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={22} />
+                  Process Request
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Quick Stats - Bento Grid style */}
+          <div className="grid grid-cols-3 gap-6 mt-8">
+            <div className="bento-card p-6 text-center transition-all hover:-translate-y-1">
+              <div className="text-3xl font-bold text-slate-950 tracking-tighter">{customers.length}</div>
+              <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Customers</div>
             </div>
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-semibold text-green-700">{products.length}</div>
-              <div className="text-sm text-green-600">Products</div>
+            <div className="bento-card p-6 text-center transition-all hover:-translate-y-1">
+              <div className="text-3xl font-bold text-slate-950 tracking-tighter">{products.length}</div>
+              <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Products</div>
             </div>
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-semibold text-purple-700">85%</div>
-              <div className="text-sm text-purple-600">Avg. Accuracy</div>
+            <div className="bento-card p-6 text-center transition-all hover:-translate-y-1">
+              <div className="text-3xl font-bold text-emerald-600 tracking-tighter">85%</div>
+              <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Avg. Accuracy</div>
             </div>
           </div>
         </div>
@@ -419,228 +566,473 @@ export const SmartQuote = () => {
     );
   }
 
-  // STEP 2: REVIEW
+
+  // STEP 2: REVIEW - Autopilot Side-by-Side View with Linear/Vercel Design
   if (step === 'review') {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-5xl mx-auto px-8 py-6">
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        {/* Header - Glass effect with tech grid */}
+        <div className="bg-white/90 backdrop-blur-xl border-b border-slate-200/40 sticky top-0 z-10">
+          <div className="max-w-[1700px] mx-auto px-8 py-5">
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900">Review Quote</h1>
-                <p className="text-gray-600 mt-1">
-                  For: <strong>{selectedCustomer?.name}</strong>
-                </p>
+              <div className="flex items-center gap-5">
+                <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-2xl flex items-center justify-center shadow-soft">
+                  <Sparkles size={26} />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-950 tracking-tight flex items-center gap-3">
+                    Autopilot Review
+                    <span className="text-[10px] bg-slate-950 text-white px-3 py-1 rounded-full font-bold uppercase tracking-widest">Human-in-the-loop</span>
+                  </h1>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Verify extracted items against source for <strong className="text-slate-700">Zero-Error</strong> precision
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => setStep('input')}
-                className="text-gray-500 hover:text-gray-700 flex items-center gap-2"
-              >
-                <Edit3 size={16} />
-                Edit Input
-              </button>
+              <div className="flex items-center gap-5">
+                <div className="text-right px-5 py-2 bg-slate-50 rounded-xl">
+                  <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Customer</p>
+                  <p className="text-sm font-bold text-slate-950 tracking-tight">{selectedCustomer?.name || newCustomerName || 'Pending'}</p>
+                </div>
+                <button
+                  onClick={() => setStep('input')}
+                  className="px-5 py-2.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all flex items-center gap-2 text-sm font-medium shadow-soft"
+                >
+                  <Edit3 size={16} />
+                  Edit Input
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-8 py-8">
-          <div className="grid grid-cols-3 gap-8">
-            {/* Left: Line Items */}
-            <div className="col-span-2 space-y-6">
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                  <h3 className="font-semibold text-gray-900">Line Items</h3>
+        {/* Main Autopilot Split View */}
+        <div className="flex-1 max-w-[1700px] mx-auto w-full px-8 py-8 flex gap-8 overflow-hidden h-[calc(100vh-90px)]">
+          {/* Left: Original Document (Source of Truth) */}
+          <div className="w-1/2 flex flex-col bento-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+              <h3 className="font-semibold text-slate-950 tracking-tight flex items-center gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <FileText size={18} />
                 </div>
+                Source Document
+              </h3>
+              {selectedFile && (
+                <span className="text-xs text-slate-500 font-medium bg-slate-100 px-3 py-1 rounded-full">
+                  {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                </span>
+              )}
+            </div>
+            <div className="flex-1 bg-slate-100 overflow-auto flex flex-col tech-grid-fine">
+              {selectedFile ? (
+                selectedFile.type === 'application/pdf' ? (
+                  <iframe
+                    src={`${fileUrl}#toolbar=0`}
+                    className="w-full h-full border-none"
+                    title="Source Document"
+                  />
+                ) : selectedFile.type.startsWith('image/') ? (
+                  <div className="p-6 flex justify-center">
+                    <img src={fileUrl || ''} alt="Source Document" className="max-w-full shadow-soft-lg rounded-xl" />
+                  </div>
+                ) : (
+                  <div className="p-10 flex items-center justify-center h-full text-slate-400 text-lg">
+                    Preview not available for this file type.
+                  </div>
+                )
+              ) : inputText ? (
+                <div className="p-8 bg-white h-full font-mono text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                  {inputText}
+                </div>
+              ) : (
+                <div className="p-10 flex items-center justify-center h-full text-slate-400 text-lg">
+                  No source content available.
+                </div>
+              )}
+            </div>
+          </div>
 
-                <div className="divide-y divide-gray-200">
-                  {lineItems.map((item, index) => (
-                    <div key={item.id} className="p-6 hover:bg-gray-50">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          {/* Item Header */}
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="text-sm text-gray-500">#{index + 1}</span>
-                            <h4 className="font-medium text-gray-900">{item.name}</h4>
-                            {item.sku && (
-                              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                                {item.sku}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Extracted Info */}
-                          <p className="text-sm text-gray-500 mb-3">
-                            Extracted: "{item.extracted_name}" × {item.extracted_qty}
-                          </p>
-
-                          {/* Pricing with Insights */}
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-gray-600">Qty:</span>
-                              <input
-                                type="number"
-                                value={item.quantity}
-                                readOnly
-                                className="w-20 px-2 py-1 border border-gray-300 rounded text-center"
-                              />
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-gray-600">Price:</span>
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={item.unit_price}
-                                  onChange={(e) => updatePrice(item.id, parseFloat(e.target.value))}
-                                  className="w-32 pl-7 pr-3 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="text-right">
-                              <div className="font-semibold text-gray-900">
-                                ${item.total.toFixed(2)}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Insights */}
-                          <div className="mt-3 space-y-1">
-                            {item.insights.alerts.map((alert: any, i: number) => (
-                              <div key={i} className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded">
-                                <AlertCircle size={14} />
-                                {alert.message}
-                              </div>
-                            ))}
-
-                            {item.insights.opportunities.map((opp: any, i: number) => (
-                              <button
-                                key={i}
-                                onClick={() => updatePrice(item.id, opp.suggestedPrice)}
-                                className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded hover:bg-green-100 transition-colors w-full text-left"
-                              >
-                                <TrendingUp size={14} />
-                                {opp.message}
-                                <span className="ml-auto text-green-600 font-medium">Apply</span>
-                              </button>
-                            ))}
-
-                            {item.insights.margin > 0 && (
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <Package size={14} />
-                                Margin: {item.insights.margin.toFixed(1)}%
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+          {/* Right: AI Extracted Table */}
+          <div className="w-1/2 flex flex-col gap-6 overflow-auto pr-2 custom-scrollbar">
+            {/* AI Customer Suggestion Banner */}
+            {showCustomerSuggestion && suggestedCustomer && (
+              <div className="animate-fade-in">
+                <div className="bento-card p-0 overflow-hidden">
+                  <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4 flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                      <Sparkles size={20} className="text-white" />
                     </div>
-                  ))}
+                    <div>
+                      <h3 className="font-bold text-white text-lg tracking-tight flex items-center gap-2">
+                        New Customer Detected
+                        <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-bold uppercase">AI</span>
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <p className="text-slate-600 mb-4">
+                      AI found <span className="font-bold text-slate-950">"{suggestedCustomer.name}"</span> in the document. Would you like to create a new profile?
+                    </p>
+                    {suggestedCustomer.email && (
+                      <p className="text-xs text-slate-500 mb-4 flex items-center gap-1">
+                        <Send size={12} /> {suggestedCustomer.email}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          setIsNewCustomer(true);
+                          setNewCustomerName(suggestedCustomer.name);
+                          setNewCustomerEmail(suggestedCustomer.email || '');
+                          setNewCustomerPhone(suggestedCustomer.phone || '');
+                          setShowCustomerSuggestion(false);
+                        }}
+                        className="flex-1 px-5 py-3 bg-slate-950 text-white font-semibold rounded-xl hover:bg-slate-800 transition-all shadow-soft flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 size={18} />
+                        Quick Add & Select
+                      </button>
+                      <button
+                        onClick={() => setShowCustomerSuggestion(false)}
+                        className="px-5 py-3 border-minimal text-slate-500 font-medium rounded-xl hover:bg-slate-50 transition-all"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bento-card overflow-hidden transition-all hover:-translate-y-0.5">
+              <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="font-semibold text-slate-950 tracking-tight flex items-center gap-3">
+                  <div className="p-2 bg-orange-50 text-orange-600 rounded-xl">
+                    <ListChecks size={18} />
+                  </div>
+                  Extracted Line Items
+                </h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-emerald-50 text-emerald-700 font-bold px-3 py-1 rounded-full">
+                    AI Confident: 92%
+                  </span>
                 </div>
               </div>
 
-              {/* Original Input (Collapsible) */}
-              <details className="bg-gray-50 border border-gray-200 rounded-lg">
-                <summary className="px-6 py-4 cursor-pointer font-medium text-gray-700">
-                  Original Input
-                </summary>
-                <div className="px-6 py-4 border-t border-gray-200">
-                  <pre className="text-sm text-gray-600 whitespace-pre-wrap font-mono">
-                    {inputText}
-                  </pre>
-                </div>
-              </details>
-            </div>
+              <div className="divide-y divide-slate-100">
+                {lineItems.map((item, index) => (
+                  <div key={item.id} className="p-6 hover:bg-slate-50/50 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        {/* Item Header */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="text-sm text-slate-400 font-medium">#{index + 1}</span>
+                          {item.product ? (
+                            <h4 className="font-semibold text-slate-950 tracking-tight">{item.name}</h4>
+                          ) : (
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) => {
+                                const newName = e.target.value;
+                                setLineItems(items => items.map(i => i.id === item.id ? { ...i, name: newName } : i));
+                              }}
+                              className="font-semibold text-slate-950 bg-transparent border-b border-dashed border-slate-300 focus:border-orange-500 focus:ring-0 px-0 py-0"
+                              placeholder="Product Name"
+                            />
+                          )}
+                          {item.product ? (
+                            <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-medium">
+                              {item.sku}
+                            </span>
+                          ) : (
+                            <input
+                              type="text"
+                              value={item.sku}
+                              onChange={(e) => {
+                                const newSku = e.target.value;
+                                setLineItems(items => items.map(i => i.id === item.id ? { ...i, sku: newSku } : i));
+                              }}
+                              className="text-xs bg-slate-50 text-slate-600 px-2.5 py-1 rounded-lg border border-dashed border-slate-300 focus:border-orange-500 focus:ring-0"
+                              placeholder="SKU"
+                            />
+                          )}
+                          {!item.product && (
+                            <span className="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-lg font-semibold">
+                              Not in Catalog
+                            </span>
+                          )}
+                          {item.product && (
+                            <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1">
+                              <Check size={12} />
+                              In Catalog
+                            </span>
+                          )}
+                        </div>
 
-            {/* Right: Summary & Actions */}
-            <div className="space-y-6">
-              {/* Quote Summary */}
-              <div className="bg-white border border-gray-200 rounded-lg p-6">
-                <h3 className="font-semibold text-gray-900 mb-4">Quote Summary</h3>
+                        {/* Extracted Info */}
+                        <p className="text-sm text-slate-500 mb-4">
+                          Extracted: "{item.extracted_name}" × {item.extracted_qty}
+                        </p>
 
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Subtotal</span>
-                    <span className="font-medium">${subtotal.toFixed(2)}</span>
-                  </div>
+                        <div className="mb-4">
+                          <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5 block">Description & Specs</label>
+                          <SmartEditor
+                            content={item.description || ''}
+                            onChange={(html) => setLineItems(items => items.map(i => i.id === item.id ? { ...i, description: html } : i))}
+                            minHeight="60px"
+                            placeholder="Add technical specs or item details..."
+                            className="bg-white"
+                          />
+                        </div>
 
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Tax ({taxRate}%)</span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={taxRate}
-                        onChange={(e) => setTaxRate(parseFloat(e.target.value))}
-                        className="w-16 px-2 py-1 border border-gray-300 rounded text-right text-sm"
-                      />
-                      <span>%</span>
+                        {/* Pricing with Insights */}
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Qty:</span>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              readOnly
+                              className="w-20 px-2 py-1 border border-gray-300 rounded text-center"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Price:</span>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={item.unit_price}
+                                onChange={(e) => updatePrice(item.id, parseFloat(e.target.value))}
+                                className="w-32 pl-7 pr-3 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="text-right flex flex-col items-end gap-2">
+                            <div className="font-semibold text-gray-900">
+                              ${item.total.toFixed(2)}
+                            </div>
+                            <button
+                              onClick={() => setLineItems(items => items.filter(i => i.id !== item.id))}
+                              className="text-gray-400 hover:text-red-500 transition-colors"
+                              title="Remove item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Insights */}
+                        <div className="mt-3 space-y-1">
+                          {item.insights.alerts.map((alert: any, i: number) => (
+                            <div key={i} className="flex items-center justify-between gap-2 text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded">
+                              <div className="flex items-center gap-2">
+                                <AlertCircle size={14} />
+                                {alert.message}
+                              </div>
+                              {alert.type === 'warning' && !item.product && (
+                                <button
+                                  onClick={() => handleAddToCatalog(item)}
+                                  disabled={addingToCatalogId === item.id}
+                                  className="text-xs bg-amber-600 text-white px-2 py-1 rounded hover:bg-amber-700 transition-colors flex items-center gap-1 font-medium disabled:opacity-50"
+                                >
+                                  {addingToCatalogId === item.id ? (
+                                    <Loader2 className="animate-spin" size={12} />
+                                  ) : (
+                                    <PlusCircle size={12} />
+                                  )}
+                                  Quick Add
+                                </button>
+                              )}
+                              {alert.type === 'warning' && item.product && (
+                                <span className="text-xs text-green-700 flex items-center gap-1">
+                                  <Check size={12} /> Added
+                                </span>
+                              )}
+                            </div>
+                          ))}
+
+                          {item.insights.opportunities.map((opp: any, i: number) => (
+                            <button
+                              key={i}
+                              onClick={() => updatePrice(item.id, opp.suggestedPrice)}
+                              className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded hover:bg-green-100 transition-colors w-full text-left"
+                            >
+                              <TrendingUp size={14} />
+                              {opp.message}
+                              <span className="ml-auto text-green-600 font-medium">Apply</span>
+                            </button>
+                          ))}
+
+                          {item.insights.margin > 0 && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                              <Package size={14} />
+                              Margin: {item.insights.margin.toFixed(1)}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+              <div className="p-4 bg-gray-50 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    const newItem = {
+                      id: `item-manual-${Date.now()}`,
+                      extracted_name: 'Manual Item',
+                      extracted_qty: 1,
+                      product: null,
+                      sku: '',
+                      name: '',
+                      description: '',
+                      quantity: 1,
+                      unit_price: 0,
+                      cost: 0,
+                      total: 0,
+                      insights: {
+                        alerts: [{ type: 'warning', message: 'Custom item - not in catalog' }],
+                        opportunities: [],
+                        basePrice: 0,
+                        suggestedPrice: 0,
+                        margin: 0
+                      }
+                    };
+                    setLineItems([...lineItems, newItem]);
+                  }}
+                  className="flex items-center gap-2 text-sm font-medium text-orange-600 hover:text-orange-700 transition-colors"
+                >
+                  <Plus size={16} />
+                  Add Custom Item
+                </button>
+              </div>
+            </div>
 
-                  <div className="text-right text-sm text-gray-600">
-                    ${taxAmount.toFixed(2)}
-                  </div>
+            {/* Removed redundant Collapsible Original Input as it's now permanently on the left */}
+          </div>
 
-                  <div className="border-t pt-3 flex justify-between">
-                    <span className="font-semibold text-gray-900">Total</span>
-                    <span className="text-2xl font-bold text-gray-900">${total.toFixed(2)}</span>
+          {/* Summary & Actions - Bento Grid */}
+          <div className="grid grid-cols-2 gap-6">
+            {/* Quote Summary */}
+            <div className="bento-card p-8 transition-all hover:-translate-y-0.5">
+              <h3 className="font-semibold text-slate-950 tracking-tight mb-6">Quote Summary</h3>
+
+              <div className="space-y-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Subtotal</span>
+                  <span className="font-semibold text-slate-700">${subtotal.toFixed(2)}</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Tax ({taxRate}%)</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={taxRate}
+                      onChange={(e) => setTaxRate(parseFloat(e.target.value))}
+                      className="w-16 px-3 py-1.5 border-minimal rounded-lg text-right text-sm shadow-soft"
+                    />
+                    <span className="text-slate-400">%</span>
                   </div>
                 </div>
 
-                {/* Time Saved Estimate */}
-                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <div className="flex items-center gap-2 text-blue-800 font-medium mb-1">
-                    <History size={16} />
-                    Time Saved
+                <div className="text-right text-sm text-slate-500">
+                  ${taxAmount.toFixed(2)}
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 flex justify-between">
+                  <span className="font-bold text-slate-950 tracking-tight">Total</span>
+                  <span className="text-3xl font-bold text-slate-950 tracking-tighter">${total.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Time Saved Estimate */}
+              <div className="mt-8 p-5 bg-blue-50 rounded-xl">
+                <div className="flex items-center gap-2 text-blue-800 font-semibold mb-2">
+                  <History size={18} />
+                  Time Saved
+                </div>
+                <p className="text-sm text-blue-700">
+                  This quote would have taken <strong>18 minutes</strong> manually.
+                  You did it in <strong>2 minutes</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Results Sidebar / Insights */}
+            <div className="space-y-6">
+              {/* Confidence Score */}
+              <div className="bento-card p-8 bg-emerald-50/50 transition-all hover:-translate-y-0.5">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold mb-4">
+                  <CheckCircle2 size={20} />
+                  Intelligence Report
+                </div>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-emerald-700">Catalog Match</span>
+                    <span className="font-bold text-emerald-800">{lineItems.filter(i => i.product).length} / {lineItems.length} items</span>
                   </div>
-                  <p className="text-sm text-blue-700">
-                    This quote would have taken <strong>18 minutes</strong> manually.
-                    You did it in <strong>2 minutes</strong>.
+                  <div className="w-full bg-emerald-200 rounded-full h-2">
+                    <div
+                      className="bg-emerald-600 h-2 rounded-full transition-all"
+                      style={{ width: `${(lineItems.filter(i => i.product).length / lineItems.length) * 100}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-emerald-600">
+                    AI matched your products. {lineItems.filter(i => !i.product).length} items require catalog creation.
                   </p>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="space-y-3">
-                <button
-                  onClick={handleSendQuote}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors"
-                >
-                  <Send size={18} />
-                  Send Quote to Customer
-                </button>
-
-                <button className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                  Save as Draft
-                </button>
-              </div>
-
-              {/* Confidence Score */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-green-800 font-medium">
-                  <CheckCircle2 size={16} />
-                  Extraction Confidence: 92%
+              {/* Time Saved Estimate */}
+              <div className="bento-card p-8 bg-blue-50/50 transition-all hover:-translate-y-0.5">
+                <div className="flex items-center gap-2 text-blue-800 font-bold mb-3">
+                  <History size={18} />
+                  Efficiency Gain
                 </div>
-                <p className="text-sm text-green-700 mt-1">
-                  AI matched {lineItems.filter(i => i.product).length} of {lineItems.length} items to your catalog
+                <p className="text-sm text-blue-700 leading-relaxed">
+                  This multi-item RFQ would typically take <strong>18 minutes</strong> to manually enter.
+                  OpenMercura processed it in <strong>3.2 seconds</strong>.
                 </p>
+                <div className="mt-5 flex items-center gap-2">
+                  <div className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">89% Faster</div>
+                  <div className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Grade A Accuracy</div>
+                </div>
               </div>
             </div>
+          </div>
+
+          {/* Final Action Buttons */}
+          <div className="flex items-center gap-5 pt-6 pb-10">
+            <button
+              onClick={handleSendQuote}
+              className="flex-1 flex items-center justify-center gap-2.5 px-8 py-5 bg-slate-950 text-white font-bold text-lg rounded-2xl hover:bg-slate-800 transition-all shadow-soft-lg hover:-translate-y-0.5"
+            >
+              <Send size={22} />
+              Approve & Send Quote
+            </button>
+
+            <button className="px-8 py-5 border-minimal text-slate-700 font-bold text-lg rounded-2xl hover:bg-slate-50 transition-all shadow-soft">
+              Save as Draft
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  // STEP 3: SENDING
+  // STEP 3: SENDING - Loading State
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center">
-        <Loader2 className="animate-spin mx-auto mb-4 text-orange-600" size={48} />
-        <h2 className="text-xl font-semibold text-gray-900">Creating Your Quote...</h2>
-        <p className="text-gray-600 mt-2">Generating PDF and sending to customer</p>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center tech-grid">
+      <div className="text-center bento-card p-12">
+        <Loader2 className="animate-spin mx-auto mb-6 text-orange-500" size={56} />
+        <h2 className="text-2xl font-bold text-slate-950 tracking-tight">Creating Your Quote...</h2>
+        <p className="text-slate-500 mt-2 text-lg">Generating PDF and sending to customer</p>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi.responses import HTMLResponse
 from typing import Optional, Dict, Any
 import os
 import uuid
 from datetime import datetime
 
 from app.services.extraction_engine import extraction_engine
-from app.database_sqlite import save_extraction
+from app.database_sqlite import save_extraction, get_extraction
 from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/extract", tags=["extraction"])
@@ -28,7 +29,11 @@ async def extract_rfq(
     # Handle file upload
     if file:
         # Validate file type
-        allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.xlsx', '.xls', '.csv']
+        allowed_extensions = [
+            '.jpg', '.jpeg', '.png', '.webp', 
+            '.pdf', '.xlsx', '.xls', '.csv',
+            '.docx', '.pptx', '.html', '.htm', '.txt', '.md'
+        ]
         file_ext = os.path.splitext(file.filename)[1].lower()
         
         if file_ext not in allowed_extensions:
@@ -173,12 +178,61 @@ async def extract_and_create_quote(
         raise HTTPException(status_code=500, detail=f"Quote creation failed: {str(e)}")
 
 
+    }
+
+
+@router.get("/{extraction_id}/visualize")
+async def visualize_extraction(
+    extraction_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
+    """
+    Get interactive HTML visualization for an extraction.
+    """
+    user_id, org_id = user_org
+    extraction = get_extraction(extraction_id, org_id)
+    
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+        
+    html = extraction["parsed_data"].get("visualization_html")
+    if not html:
+        return HTMLResponse(content="<html><body><h1>No visualization available</h1></body></html>")
+        
+    return HTMLResponse(content=html)
+
+
+@router.get("/{extraction_id}")
+async def get_extraction_details(
+    extraction_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
+    """
+    Get full extraction details including parsed data.
+    """
+    user_id, org_id = user_org
+    extraction = get_extraction(extraction_id, org_id)
+    
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+        
+    return extraction
+
+
 @router.get("/status")
 async def get_extraction_status():
     """Check if extraction services are available."""
+    # Check if AI service is configured
+    ai_status = False
+    try:
+        if extraction_engine.ai_service:
+            ai_status = True
+    except:
+        pass
+        
     return {
         "available": True,
-        "ai_available": extraction_engine.client is not None,
-        "ocr_available": True,  # Tesseract
-        "supported_sources": ["text", "email", "image", "document"]
+        "ai_available": ai_status,
+        "ocr_available": True,
+        "supported_sources": ["text", "email", "image", "document", "spreadsheet"]
     }

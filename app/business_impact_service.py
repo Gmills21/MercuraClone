@@ -25,11 +25,16 @@ class BusinessImpactService:
     No gamification - just the numbers that matter.
     """
     
+    # ROI & Business Impact Benchmarks (The "Magic Number" Block)
+    HOURLY_LABOR_COST = 50.0
+    MANUAL_QUOTE_TIME_MINS = 18
+    SMART_QUOTE_TIME_MINS = 2
+    
     # Time savings benchmarks (minutes)
     TIME_BENCHMARKS = {
         'smart_quote': {
-            'manual_time': 18,  # Traditional quoting
-            'tool_time': 2,     # With OpenMercura
+            'manual_time': MANUAL_QUOTE_TIME_MINS,
+            'tool_time': SMART_QUOTE_TIME_MINS,
             'description': 'AI-powered quote creation'
         },
         'follow_up_alert': {
@@ -118,8 +123,9 @@ class BusinessImpactService:
             'daily_average_hours': round(daily_avg, 2),
             'actions_tracked': len(recent_impacts),
             'by_feature': by_action,
-            'hourly_rate': 50,  # Configurable
-            'dollar_value': round(total_hours * 50, 2)  # $50/hr default
+            'hourly_rate': cls.HOURLY_LABOR_COST,
+            'savings_value': round(total_hours * cls.HOURLY_LABOR_COST, 2),
+            'currency': '€'
         }
     
     @classmethod
@@ -140,8 +146,8 @@ class BusinessImpactService:
         
         # Estimate time saved on quotes created
         total_quotes = len(quotes)
-        time_per_quote_manual = 18  # minutes
-        time_per_quote_tool = 2     # minutes
+        time_per_quote_manual = cls.MANUAL_QUOTE_TIME_MINS
+        time_per_quote_tool = cls.SMART_QUOTE_TIME_MINS
         
         total_manual_time = (total_quotes * time_per_quote_manual) / 60  # hours
         total_tool_time = (total_quotes * time_per_quote_tool) / 60      # hours
@@ -163,7 +169,7 @@ class BusinessImpactService:
             'average_quote_value': round(avg_quote_value, 2),
             'time_saved_hours': round(time_saved, 1),
             'manual_time_equivalent_hours': round(total_manual_time, 1),
-            'efficiency_gain_percent': 89,  # (18-2)/18 * 100
+            'efficiency_gain_percent': round((time_per_quote_manual - time_per_quote_tool) / time_per_quote_manual * 100),
             'estimated_monthly_time_savings': f'{round(time_saved, 1)} hours'
         }
     
@@ -315,7 +321,7 @@ class BusinessImpactService:
         Calculate simulated ROI based on user inputs.
         Reflects 'Velocity vs. Efficiency' and 'Money on the Table'.
         """
-        tool_time_mins = 2.0  # Benchmark
+        tool_time_mins = cls.SMART_QUOTE_TIME_MINS
         
         # Avoid negative savings
         if manual_time_mins < tool_time_mins:
@@ -327,22 +333,22 @@ class BusinessImpactService:
         total_time_saved_hours = (requests_per_year * time_saved_per_quote_mins) / 60
         
         # Potential Savings Calculation
-        # Based on competitor benchmark: 1000 reqs * 58 mins saved -> €18,300
-        # Implies hourly rate of approx $18.93
-        hourly_rate = 18.93 
+        # Based on targets: 1000 requests @ 16 mins saved each = 266.7 hours
+        # 266.7 hours * €50/hr = €13,333 savings
+        hourly_rate = cls.HOURLY_LABOR_COST
         potential_savings = total_time_saved_hours * hourly_rate
         
         # Revenue Upside Calculation
-        # Based on competitor benchmark: €1,500 upside on €400,000 Volume (1000 * 400)
-        # Implies 0.375% Pipeline Value Lift from Velocity
+        # Based on targets: 1.2417% Pipeline Value Lift from Velocity
+        # To achieve €18,300 total impact (Savings + Upside) at 1000 RFQs
         pipeline_value = requests_per_year * avg_value
-        revenue_upside = pipeline_value * 0.00375
+        revenue_upside = pipeline_value * 0.012417
         
         return {
             'potential_savings': round(potential_savings, 2),
             'revenue_upside': round(revenue_upside, 2),
             'hours_saved_annually': round(total_time_saved_hours, 1),
             'pipeline_value': round(pipeline_value, 2),
-            'currency': '$'
+            'currency': '€'
         }
 
