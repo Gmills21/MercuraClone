@@ -1,8 +1,8 @@
 import json
-from typing import List
+from typing import List, Union
 from .data import ExtractionResult
 
-def visualize(extraction_result_path_or_obj: str | ExtractionResult) -> str:
+def visualize(extraction_result_path_or_obj: Union[str, ExtractionResult]) -> str:
     """
     Generate interactive HTML visualization for extraction results.
     """
