@@ -174,3 +174,23 @@ export const erpApi = {
     downloadQuote: (quoteId: string, format: string) =>
         api.get(`/export/quote/${quoteId}?format=${format}`, { responseType: 'blob' }),
 };
+
+// AI Copilot API - Industrial Subject Matter Expert
+export const copilotApi = {
+    // Process a natural language command
+    command: (command: string, quoteId?: string, context?: any) =>
+        api.post('/copilot/command', { command, quote_id: quoteId, context }),
+    
+    // Analyze a quote and get recommendations
+    analyze: (quoteId: string) => api.get(`/copilot/analyze/${quoteId}`),
+    
+    // Get context-aware command suggestions
+    getSuggestions: (quoteId: string) => api.get(`/copilot/suggestions/${quoteId}`),
+    
+    // Apply a copilot-suggested change
+    applyChange: (quoteId: string, change: any) =>
+        api.post('/copilot/apply-change', { quote_id: quoteId, change }),
+    
+    // Health check
+    health: () => api.get('/copilot/health'),
+};

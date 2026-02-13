@@ -136,8 +136,6 @@ class BusinessImpactService:
         
         return {
             'period_days': days,
-        return {
-            'period_days': days,
             'total_minutes_saved': manual_minutes,
             'total_hours_saved': round(total_hours, 1),
             'daily_average_hours': round(daily_avg, 2),
@@ -205,12 +203,6 @@ class BusinessImpactService:
         total_value = sum(q.get('total', 0) for q in quotes if q.get('status') == 'accepted')
         avg_quote_value = total_value / accepted if accepted > 0 else 0
         
-        return {
-            'total_quotes_created': total_quotes,
-            'quotes_accepted': accepted,
-            'win_rate_percent': round(win_rate, 1),
-            'total_revenue': round(total_value, 2),
-            'average_quote_value': round(avg_quote_value, 2),
         return {
             'total_quotes_created': total_quotes,
             'quotes_accepted': accepted,

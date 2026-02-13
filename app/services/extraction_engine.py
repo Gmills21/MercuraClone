@@ -470,7 +470,10 @@ class ExtractionEngine:
                     line_num = -1 # fallback group
                 
                 if line_num not in line_items_map:
-                    line_items_map[line_num] = {}
+                    line_items_map[line_num] = {
+                        "fields": {},
+                        "source_locations": []
+                    }
                 
                 # Map class to field name
                 # line_item_quantity -> quantity
@@ -483,21 +486,55 @@ class ExtractionEngine:
                     import re
                     nums = re.findall(r'\d+', ext.extraction_text)
                     if nums:
-                        line_items_map[line_num][field] = int(nums[0])
+                        line_items_map[line_num]["fields"][field] = int(nums[0])
                     else:
-                        line_items_map[line_num][field] = 1
+                        line_items_map[line_num]["fields"][field] = 1
                 else:
-                    line_items_map[line_num][field] = ext.extraction_text
+                    line_items_map[line_num]["fields"][field] = ext.extraction_text
+                
+                # Store source location for zero-error precision
+                if ext.source_start_char is not None and ext.source_end_char is not None:
+                    line_items_map[line_num]["source_locations"].append({
+                        "field": field,
+                        "start_char": ext.source_start_char,
+                        "end_char": ext.source_end_char,
+                        "confidence": ext.confidence or 0.8
+                    })
 
             # Convert map to list
             for line_num, item_data in sorted(line_items_map.items()):
-                if "item_name" in item_data or "sku" in item_data: # Filter valid items
+                fields = item_data["fields"]
+                if "item_name" in fields or "sku" in fields: # Filter valid items
+                    # Calculate bounding box from source locations (approximate)
+                    source_locs = item_data["source_locations"]
+                    bbox = None
+                    if source_locs:
+                        # Use the first source location to estimate position
+                        first_loc = source_locs[0]
+                        # Approximate position as percentage of text length
+                        total_len = len(text)
+                        if total_len > 0:
+                            start_pct = (first_loc["start_char"] / total_len) * 100
+                            bbox = {
+                                "x": 5,  # Left margin
+                                "y": min(start_pct, 95),  # Vertical position
+                                "width": 90,  # Full width minus margins
+                                "height": 3   # Approximate line height
+                            }
+                    
                     data["line_items"].append({
-                        "item_name": item_data.get("item_name", "Unknown Item"),
-                        "quantity": item_data.get("quantity", 1),
-                        "sku": item_data.get("sku"),
-                        "unit": item_data.get("unit", "pcs"),
-                        "notes": f"Line {line_num+1}" if line_num >= 0 else None
+                        "item_name": fields.get("item_name", "Unknown Item"),
+                        "quantity": fields.get("quantity", 1),
+                        "sku": fields.get("sku"),
+                        "unit": fields.get("unit", "pcs"),
+                        "notes": f"Line {line_num+1}" if line_num >= 0 else None,
+                        "source_location": {
+                            "line": line_num + 1 if line_num >= 0 else None,
+                            "page": 1,  # Single page for text
+                            "bbox": bbox,
+                            "char_range": source_locs[0] if source_locs else None
+                        },
+                        "extraction_confidence": min([loc["confidence"] for loc in source_locs]) if source_locs else 0.7
                     })
             
             return data

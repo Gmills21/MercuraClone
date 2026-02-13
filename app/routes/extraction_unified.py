@@ -149,18 +149,29 @@ async def extract_and_create_quote(
         
         # Add line items
         from app.database_sqlite import add_quote_item
-        for item in data.get("line_items", []):
+        for idx, item in enumerate(data.get("line_items", [])):
             item_data = {
                 "id": str(uuid.uuid4()),
                 "quote_id": quote_id,
                 "product_id": None,
                 "product_name": item.get("item_name", "Unknown Item"),
                 "sku": item.get("sku", ""),
-                "description": item.get("notes", ""),
+                "description": item.get("item_name", ""),  # Use item_name as description
                 "quantity": item.get("quantity", 1),
                 "unit_price": 0,
                 "total_price": 0,
-                "competitor_sku": None
+                "competitor_sku": None,
+                "metadata": {
+                    "original_extraction": {
+                        "item_name": item.get("item_name"),
+                        "quantity": item.get("quantity"),
+                        "sku": item.get("sku"),
+                        "confidence_score": item.get("extraction_confidence", 0.7)
+                    },
+                    "source_location": item.get("source_location"),
+                    "extraction_method": extract_result.get("extraction_method"),
+                    "item_index": idx
+                }
             }
             add_quote_item(item_data)
         
@@ -176,9 +187,6 @@ async def extract_and_create_quote(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Quote creation failed: {str(e)}")
-
-
-    }
 
 
 @router.get("/{extraction_id}/visualize")
