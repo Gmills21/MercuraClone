@@ -2,7 +2,6 @@
 Gemini 1.5 Flash integration for data extraction.
 """
 
-import google.generativeai as genai
 from app.config import settings
 from app.models import ExtractionRequest, ExtractionResponse
 import json
@@ -13,8 +12,18 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini
-genai.configure(api_key=settings.gemini_api_key)
+# Try to configure Gemini, but handle version mismatch gracefully
+try:
+    import google.generativeai as genai
+    # Test if GenerativeModel exists (not in older versions)
+    if not hasattr(genai, 'GenerativeModel'):
+        raise ImportError("google-generativeai version too old. Need >=0.3.2")
+    genai.configure(api_key=settings.gemini_api_key)
+    GEMINI_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"Gemini service unavailable: {e}")
+    genai = None
+    GEMINI_AVAILABLE = False
 
 
 class GeminiService:
@@ -22,6 +31,9 @@ class GeminiService:
     
     def __init__(self):
         """Initialize Gemini model."""
+        if not GEMINI_AVAILABLE:
+            raise RuntimeError("Gemini service not available. Install google-generativeai>=0.3.2")
+        
         print(f"Gemini model from settings: {settings.gemini_model}")
         self.model = genai.GenerativeModel(model_name=settings.gemini_model)
         
@@ -304,5 +316,10 @@ Now analyze the provided document and return the extracted data as valid JSON:""
         return round(filled_fields / total_fields, 2)
 
 
-# Global service instance
-gemini_service = GeminiService()
+# Global service instance (lazy init to handle import errors gracefully)
+gemini_service = None
+try:
+    if GEMINI_AVAILABLE:
+        gemini_service = GeminiService()
+except Exception as e:
+    logger.warning(f"Failed to initialize GeminiService: {e}")
