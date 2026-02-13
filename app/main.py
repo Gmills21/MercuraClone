@@ -63,6 +63,9 @@ from app.routes import ai_service
 from app.routes import projects
 from app.routes import email_ingestion
 from app.routes import copilot
+from app.routes import pdf
+from app.routes import email as email_routes
+from app.routes import import_csv
 
 # Create FastAPI app
 app = FastAPI(
@@ -109,6 +112,9 @@ app.include_router(ai_service.router)  # AI service management
 app.include_router(projects.router)  # Industrial Projects grouping
 app.include_router(email_ingestion.router)
 app.include_router(copilot.router)  # AI Copilot - Industrial Subject Matter Expert
+app.include_router(pdf.router)  # PDF generation
+app.include_router(email_routes.router)  # Email sending
+app.include_router(import_csv.router)  # CSV import
 
 # Serve frontend static files
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

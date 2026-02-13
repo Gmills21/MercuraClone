@@ -194,3 +194,78 @@ export const copilotApi = {
     // Health check
     health: () => api.get('/copilot/health'),
 };
+
+// PDF Generation API
+export const pdfApi = {
+    // Download quote as PDF
+    downloadQuote: (quoteId: string) =>
+        api.get(`/pdf/quote/${quoteId}`, { responseType: 'blob' }),
+    
+    // Preview quote PDF (inline)
+    previewQuote: (quoteId: string) =>
+        api.get(`/pdf/quote/${quoteId}/preview`, { responseType: 'blob' }),
+    
+    // Check PDF service status
+    status: () => api.get('/pdf/status'),
+};
+
+// Email API
+export const emailApi = {
+    // Send quote via email with PDF attachment
+    sendQuote: (quoteId: string, data: { to_email: string; to_name?: string; message?: string; include_pdf?: boolean }) =>
+        api.post(`/email/quote/${quoteId}/send`, data),
+    
+    // Send custom email
+    sendEmail: (data: { to_email: string; to_name?: string; subject: string; body_text: string; body_html?: string }) =>
+        api.post('/email/send', data),
+    
+    // Test email configuration
+    testConfig: (testEmail: string) =>
+        api.post('/email/test', { test_email: testEmail }),
+    
+    // Check email service status
+    status: () => api.get('/email/status'),
+};
+
+// CSV Import API
+export const importApi = {
+    // Preview import before committing
+    preview: (importType: string, file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post(`/import/preview/${importType}`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    
+    // Import products
+    importProducts: (file: File, columnMapping?: Record<string, string>) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (columnMapping) {
+            formData.append('column_mapping', JSON.stringify(columnMapping));
+        }
+        return api.post('/import/products', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    
+    // Import customers
+    importCustomers: (file: File, columnMapping?: Record<string, string>) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (columnMapping) {
+            formData.append('column_mapping', JSON.stringify(columnMapping));
+        }
+        return api.post('/import/customers', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    
+    // Download import template
+    downloadTemplate: (templateType: string) =>
+        api.get(`/import/templates/${templateType}`, { responseType: 'blob' }),
+    
+    // Check import service status
+    status: () => api.get('/import/status'),
+};

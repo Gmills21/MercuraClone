@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { quotesApi, productsApi, quotesApiExtended, erpApi, quickbooksApi } from '../services/api';
+import { quotesApi, productsApi, quotesApiExtended, erpApi, quickbooksApi, pdfApi, emailApi } from '../services/api';
 import { SmartEditor } from '../components/ui/SmartEditor';
 import { CopilotCommandBar } from '../components/CopilotCommandBar';
 import { SourceDocumentViewer } from '../components/SourceDocumentViewer';
@@ -8,7 +8,7 @@ import {
   Save, ChevronLeft, CheckCircle, AlertTriangle, Lightbulb, Check, Copy, 
   TrendingDown, Info, TrendingUp, ArrowRight, X, Zap, Shield, DollarSign, 
   Link as LinkIcon, CheckCircle2, Sparkles, RefreshCw, UploadCloud, Download,
-  Eye, FileText, Split, Maximize2, Minimize2, MapPin
+  Eye, FileText, Split, Maximize2, Minimize2, MapPin, Mail, FileDown
 } from 'lucide-react';
 import { trackEvent } from '../posthog';
 
@@ -36,6 +36,16 @@ export const QuoteReview = () => {
     const [optimizedItems, setOptimizedItems] = useState<{ [key: number]: any }>({});
     const [shareLink, setShareLink] = useState<string | null>(null);
     const [generatingLink, setGeneratingLink] = useState(false);
+    
+    // PDF & Email state
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
+    const [showEmailDialog, setShowEmailDialog] = useState(false);
+    const [sendingEmail, setSendingEmail] = useState(false);
+    const [emailData, setEmailData] = useState({
+        to_email: '',
+        to_name: '',
+        message: ''
+    });
 
     useEffect(() => {
         if (id) {
@@ -356,6 +366,57 @@ export const QuoteReview = () => {
         element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     };
 
+    // Download PDF
+    const handleDownloadPdf = async () => {
+        if (!id) return;
+        try {
+            setDownloadingPdf(true);
+            const response = await pdfApi.downloadQuote(id);
+            
+            // Create download link
+            const blob = new Blob([response.data], { type: 'application/pdf' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Quote_${quote?.quote_number || id}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            trackEvent('quote_pdf_downloaded', { quote_id: id });
+        } catch (error) {
+            console.error('PDF download failed:', error);
+            alert('Failed to download PDF. Please try again.');
+        } finally {
+            setDownloadingPdf(false);
+        }
+    };
+
+    // Send email
+    const handleSendEmail = async () => {
+        if (!id || !emailData.to_email) return;
+        try {
+            setSendingEmail(true);
+            await emailApi.sendQuote(id, {
+                to_email: emailData.to_email,
+                to_name: emailData.to_name,
+                message: emailData.message,
+                include_pdf: true
+            });
+            
+            alert('Quote sent successfully!');
+            setShowEmailDialog(false);
+            setEmailData({ to_email: '', to_name: '', message: '' });
+            trackEvent('quote_email_sent', { quote_id: id });
+        } catch (error) {
+            console.error('Email send failed:', error);
+            alert('Failed to send email. Please check your email configuration.');
+        } finally {
+            setSendingEmail(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-screen">
@@ -472,6 +533,27 @@ export const QuoteReview = () => {
                                     }
                                 }}
                             />
+
+                            {/* PDF Download */}
+                            <button
+                                onClick={handleDownloadPdf}
+                                disabled={downloadingPdf}
+                                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-all"
+                                title="Download PDF"
+                            >
+                                {downloadingPdf ? <RefreshCw className="animate-spin" size={16} /> : <FileDown size={16} />}
+                                <span className="hidden lg:inline">PDF</span>
+                            </button>
+
+                            {/* Email Send */}
+                            <button
+                                onClick={() => setShowEmailDialog(true)}
+                                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-all"
+                                title="Email Quote"
+                            >
+                                <Mail size={16} />
+                                <span className="hidden lg:inline">Email</span>
+                            </button>
 
                             {Object.keys(suggestions).length > 0 && (
                                 <button
@@ -892,6 +974,74 @@ export const QuoteReview = () => {
                     </div>
                 )}
             </main>
+
+            {/* Email Send Dialog */}
+            {showEmailDialog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 w-full max-w-md mx-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-white">Email Quote</h3>
+                            <button
+                                onClick={() => setShowEmailDialog(false)}
+                                className="p-1 text-slate-400 hover:text-white"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-slate-400 mb-1">Customer Email *</label>
+                                <input
+                                    type="email"
+                                    value={emailData.to_email}
+                                    onChange={(e) => setEmailData({ ...emailData, to_email: e.target.value })}
+                                    placeholder="customer@company.com"
+                                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm text-slate-400 mb-1">Customer Name</label>
+                                <input
+                                    type="text"
+                                    value={emailData.to_name}
+                                    onChange={(e) => setEmailData({ ...emailData, to_name: e.target.value })}
+                                    placeholder="John Smith"
+                                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm text-slate-400 mb-1">Message (Optional)</label>
+                                <textarea
+                                    value={emailData.message}
+                                    onChange={(e) => setEmailData({ ...emailData, message: e.target.value })}
+                                    placeholder="Add a personal message..."
+                                    rows={3}
+                                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none resize-none"
+                                />
+                            </div>
+                            
+                            <div className="flex items-center gap-3 pt-2">
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={!emailData.to_email || sendingEmail}
+                                    className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-all"
+                                >
+                                    {sendingEmail ? 'Sending...' : 'Send Quote'}
+                                </button>
+                                <button
+                                    onClick={() => setShowEmailDialog(false)}
+                                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-all"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
