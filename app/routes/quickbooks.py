@@ -6,17 +6,17 @@ OAuth2 flow, sync operations, and status.
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
+import uuid
 
-from app.quickbooks_service import (
-    QuickBooksService, get_qb_service, is_connected,
-    disconnect, get_connection_info, QUICKBOOKS_CLIENT_ID,
-    QBO_REDIRECT_URI
-)
-from app.database_sqlite import list_products, list_customers
+from app.integrations import ERPRegistry
+from app.integrations.quickbooks import QUICKBOOKS_CLIENT_ID, QBO_REDIRECT_URI
+from app.database_sqlite import list_products, list_customers, create_product, create_customer, get_quote_with_items
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/quickbooks", tags=["quickbooks"])
 
-# Configuration - now using the one from service/settings
+# Configuration
 REDIRECT_URI = QBO_REDIRECT_URI
 
 
@@ -33,33 +33,47 @@ class QuickBooksSyncResponse(BaseModel):
     message: str
 
 
+def get_qb_provider():
+    provider = ERPRegistry.get("quickbooks")
+    if not provider:
+        raise HTTPException(status_code=503, detail="QuickBooks provider not available")
+    return provider
+
+
 @router.get("/auth-url")
-async def get_auth_url(user_id: str = "test-user"):
+async def get_auth_url(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get QuickBooks OAuth authorization URL.
     Frontend redirects user to this URL to connect QuickBooks.
     """
-    if not QUICKBOOKS_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="QuickBooks not configured")
+    user_id, org_id = user_org
     
-    auth_url = QuickBooksService.get_authorization_url(user_id, REDIRECT_URI)
+    if not QUICKBOOKS_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="QuickBooks not configured")
+    
+    provider = get_qb_provider()
+    auth_url = await provider.get_auth_url(user_id, REDIRECT_URI)
     return {"auth_url": auth_url}
 
 
 @router.post("/connect")
-async def connect_quickbooks(code: str, user_id: str = "test-user"):
+async def connect_quickbooks(
+    code: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Exchange OAuth code for access token after user authorizes.
     Called by frontend after redirect from QuickBooks.
     """
-    result = await QuickBooksService.exchange_code_for_token(
-        code=code,
-        user_id=user_id,
-        redirect_uri=REDIRECT_URI
-    )
+    user_id, org_id = user_org
     
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+    provider = get_qb_provider()
+    result = await provider.connect(code, user_id, REDIRECT_URI)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to connect"))
     
     return {
         "success": True,
@@ -69,14 +83,24 @@ async def connect_quickbooks(code: str, user_id: str = "test-user"):
 
 
 @router.get("/status")
-async def get_connection_status(user_id: str = "test-user"):
+async def get_connection_status(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get QuickBooks connection status for current user.
     """
-    info = get_connection_info(user_id)
+    user_id, org_id = user_org
     
-    if not info:
+    provider = get_qb_provider()
+    
+    # Check simple connection status first
+    if not await provider.is_connected(user_id):
         return QuickBooksStatusResponse(connected=False)
+    
+    # Get detailed info if available
+    info = await provider.get_connection_details(user_id)
+    if not info:
+         return QuickBooksStatusResponse(connected=True) # Fallback if details missing
     
     return QuickBooksStatusResponse(
         connected=True,
@@ -86,38 +110,85 @@ async def get_connection_status(user_id: str = "test-user"):
 
 
 @router.post("/disconnect")
-async def disconnect_quickbooks(user_id: str = "test-user"):
+async def disconnect_quickbooks(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Disconnect QuickBooks integration.
     """
-    success = disconnect(user_id)
-    if not success:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=400, detail="Not connected")
+        
+    success = await provider.disconnect(user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to disconnect")
     
     return {"success": True, "message": "QuickBooks disconnected"}
 
 
 @router.post("/sync/import")
-async def import_from_quickbooks(user_id: str = "test-user"):
+async def import_from_quickbooks(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Import products and customers FROM QuickBooks TO OpenMercura.
-    This is the "Auto-Import" feature - one click to pull all QB data.
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        result = await qb.import_from_qb()
+        result = await provider.import_from_qb(user_id)
         
-        # Here you would save to local database
-        # For now, just return the data
+        # Save to organization database
+        now = datetime.utcnow().isoformat()
+        
+        products_created = 0
+        customers_created = 0
+        
+        # Import products
+        for product in result.get("products", []):
+            product_data = {
+                "id": str(uuid.uuid4()),
+                "organization_id": org_id,
+                "sku": product.get("sku", ""),
+                "name": product.get("name", ""),
+                "description": product.get("description", ""),
+                "price": product.get("price", 0),
+                "cost": product.get("cost"),
+                "category": product.get("category"),
+                "created_at": now,
+                "updated_at": now
+            }
+            if create_product(product_data):
+                products_created += 1
+        
+        # Import customers
+        for customer in result.get("customers", []):
+            customer_data = {
+                "id": str(uuid.uuid4()),
+                "organization_id": org_id,
+                "name": customer.get("name", ""),
+                "email": customer.get("email", ""),
+                "company": customer.get("company", ""),
+                "phone": customer.get("phone", ""),
+                "address": customer.get("address", ""),
+                "created_at": now,
+                "updated_at": now
+            }
+            if create_customer(customer_data):
+                customers_created += 1
         
         return QuickBooksSyncResponse(
             success=True,
-            products_imported=result["product_count"],
-            customers_imported=result["customer_count"],
-            message=f"Imported {result['product_count']} products and {result['customer_count']} customers from QuickBooks"
+            products_imported=products_created,
+            customers_imported=customers_created,
+            message=f"Imported {products_created} products and {customers_created} customers from QuickBooks"
         )
         
     except Exception as e:
@@ -125,20 +196,24 @@ async def import_from_quickbooks(user_id: str = "test-user"):
 
 
 @router.post("/sync/export-products")
-async def export_products_to_quickbooks(user_id: str = "test-user"):
+async def export_products_to_quickbooks(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Export products FROM OpenMercura TO QuickBooks.
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        # Get local products
-        products = list_products(limit=1000)
+        # Get local products for this organization
+        products = list_products(organization_id=org_id, limit=1000)
         
         # Sync to QB
-        result = await qb.sync_products_to_qb(products)
+        result = await provider.sync_products_to_qb(products, user_id)
         
         return {
             "success": True,
@@ -152,20 +227,24 @@ async def export_products_to_quickbooks(user_id: str = "test-user"):
 
 
 @router.post("/sync/export-customers")
-async def export_customers_to_quickbooks(user_id: str = "test-user"):
+async def export_customers_to_quickbooks(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Export customers FROM OpenMercura TO QuickBooks.
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        # Get local customers
-        customers = list_customers(limit=1000)
+        # Get local customers for this organization
+        customers = list_customers(organization_id=org_id, limit=1000)
         
         # Sync to QB
-        result = await qb.sync_customers_to_qb(customers)
+        result = await provider.sync_customers_to_qb(customers, user_id)
         
         return {
             "success": True,
@@ -179,21 +258,25 @@ async def export_customers_to_quickbooks(user_id: str = "test-user"):
 
 
 @router.post("/sync/bidirectional")
-async def bidirectional_sync(user_id: str = "test-user"):
+async def bidirectional_sync(
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Two-way sync: Import from QB, export to QB.
     The "Magic Sync" button.
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
         # Import from QB
-        import_result = await qb.import_from_qb()
+        import_result = await provider.import_from_qb(user_id)
         
-        # Export to QB (products not already there)
-        # This would need logic to check for duplicates
+        # Export to QB logic could go here, omitting for brevity as per previous implementation 
+        # (imports were the priority in the original file too, despite the name)
         
         return {
             "success": True,
@@ -209,64 +292,77 @@ async def bidirectional_sync(user_id: str = "test-user"):
 
 
 @router.get("/products")
-async def get_quickbooks_products(user_id: str = "test-user", limit: int = 100):
+async def get_quickbooks_products(
+    limit: int = 100,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get products directly from QuickBooks (for preview/selection).
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        products = await qb.get_items(limit)
+        products = await provider.get_items(user_id, limit)
         return {"products": products, "count": len(products)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/customers")
-async def get_quickbooks_customers(user_id: str = "test-user", limit: int = 100):
+async def get_quickbooks_customers(
+    limit: int = 100,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Get customers directly from QuickBooks (for preview/selection).
     """
-    qb = get_qb_service(user_id)
-    if not qb:
+    user_id, org_id = user_org
+    
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        customers = await qb.get_customers(limit)
+        customers = await provider.get_customers(user_id, limit)
         return {"customers": customers, "count": len(customers)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/export-quote")
-async def export_quote_to_quickbooks(quote_id: str, user_id: str = "test-user"):
+async def export_quote_to_quickbooks(
+    quote_id: str,
+    user_org: tuple = Depends(get_current_user_and_org)
+):
     """
     Export a specific quote as an Estimate in QuickBooks.
     """
-    from app.database_sqlite import get_quote_with_items
+    user_id, org_id = user_org
     
-    qb = get_qb_service(user_id)
-    if not qb:
+    provider = get_qb_provider()
+    if not await provider.is_connected(user_id):
         raise HTTPException(status_code=401, detail="QuickBooks not connected")
     
     try:
-        # Get quote from local DB
-        quote = get_quote_with_items(quote_id)
+        # Get quote from local DB with organization check
+        quote = get_quote_with_items(quote_id, org_id)
         if not quote:
             raise HTTPException(status_code=404, detail="Quote not found")
         
         # Create estimate in QB
-        result = await qb.create_estimate(quote, quote.get("items", []))
+        result = await provider.export_quote(user_id, quote)
         
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Export failed"))
         
         return {
             "success": True,
-            "qb_estimate_id": result.get("Estimate", {}).get("Id"),
-            "message": "Quote exported to QuickBooks as Estimate"
+            "qb_estimate_id": result.get("estimate_id"),
+            "message": result.get("message", "Quote exported to QuickBooks")
         }
         
     except Exception as e:

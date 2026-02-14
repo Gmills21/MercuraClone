@@ -277,7 +277,7 @@ class BusinessImpactService:
         monthly_cost = 99  # $99/month for Pro plan
         
         # Value generated
-        time_value = time_summary['dollar_value']
+        time_value = time_summary['savings_value']
         revenue_from_follow_ups = follow_up.get('converted_after_follow_up', 0) * 5000
         
         total_value = time_value + (revenue_from_follow_ups * 0.2)  # 20% attribution
@@ -357,6 +357,8 @@ class BusinessImpactService:
         if not recs:
             recs.append("Continue current workflow - metrics look good")
         
+        return recs
+    
     @classmethod
     def calculate_roi_simulation(cls,
                                  requests_per_year: int,

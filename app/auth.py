@@ -4,7 +4,6 @@ User authentication and role management for multi-user support.
 
 import os
 import uuid
-import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
@@ -18,20 +17,41 @@ ACCESS_TOKEN_EXPIRE_DAYS = 30
 # In-memory token store (use Redis in production)
 _active_tokens: Dict[str, Dict[str, Any]] = {}
 
-
-def _hash_password(password: str) -> str:
-    """Hash password with salt."""
-    salt = secrets.token_hex(16)
-    pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-    return salt + pwdhash.hex()
-
-
-def _verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against hash."""
-    salt = password_hash[:32]
-    stored_hash = password_hash[32:]
-    pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-    return pwdhash.hex() == stored_hash
+# Password hashing - use bcrypt if available, fallback to secure PBKDF2
+try:
+    import bcrypt
+    def hash_password(password: str) -> str:
+        """Hash password using bcrypt (preferred)."""
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
+    
+    def verify_password(password: str, password_hash: str) -> bool:
+        """Verify password against bcrypt hash."""
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    
+    _USING_BCRYPT = True
+except ImportError:
+    import hashlib
+    # Fallback to PBKDF2 with secure parameters if bcrypt not available
+    def hash_password(password: str) -> str:
+        """Hash password with PBKDF2-SHA256 (fallback if bcrypt unavailable)."""
+        salt = secrets.token_hex(32)  # 256-bit salt
+        pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 600000)
+        return f"pbkdf2:${salt}${pwdhash.hex()}"
+    
+    def verify_password(password: str, password_hash: str) -> bool:
+        """Verify password against PBKDF2 hash."""
+        if password_hash.startswith("pbkdf2:"):
+            _, salt, stored_hash = password_hash.split("$")
+            iterations = 600000
+        else:
+            # Legacy format support (old salt length)
+            salt = password_hash[:32]
+            stored_hash = password_hash[32:]
+            iterations = 100000
+        pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations)
+        return pwdhash.hex() == stored_hash
+    
+    _USING_BCRYPT = False
 
 
 @dataclass
@@ -55,7 +75,7 @@ DEFAULT_USERS = [
         "name": "System Admin",
         "role": "admin",
         "company_id": "default",
-        "password_hash": _hash_password("admin123"),  # Change in production!
+        "password_hash": hash_password("admin123"),  # Change in production!
         "created_at": datetime.utcnow().isoformat(),
         "is_active": True
     }
@@ -76,7 +96,7 @@ def create_user(email: str, name: str, password: str, role: str = "sales_rep", c
                 INSERT INTO users (id, email, name, password_hash, role, company_id, created_at, is_active)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                user_id, email, name, _hash_password(password), role, company_id, now, True
+                user_id, email, name, hash_password(password), role, company_id, now, True
             ))
             conn.commit()
             
@@ -104,7 +124,7 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
         cursor.execute("SELECT * FROM users WHERE email = ? AND is_active = 1", (email,))
         row = cursor.fetchone()
         
-        if row and _verify_password(password, row["password_hash"]):
+        if row and verify_password(password, row["password_hash"]):
             # Update last login
             now = datetime.utcnow().isoformat()
             cursor.execute("UPDATE users SET last_login = ? WHERE id = ?", (now, row["id"]))

@@ -29,17 +29,58 @@ async def create_organization(
     Create a new organization with owner user.
     This is used during signup flow.
     """
+    import re
+    
+    # Generate safe slug from name if not provided
+    def generate_safe_slug(name: str) -> str:
+        """Generate URL-safe slug from organization name."""
+        # Remove special chars, convert to lowercase
+        slug = re.sub(r'[^a-zA-Z0-9\s-]', '', name.lower())
+        # Replace spaces with hyphens
+        slug = re.sub(r'\s+', '-', slug)
+        # Remove leading/trailing hyphens
+        return slug.strip('-')
+    
+    # Use provided slug or generate from name
+    slug = request.slug if request.slug else generate_safe_slug(request.name)
+    
+    # Validate slug format
+    if not re.match(r'^[a-z0-9-]+$', slug):
+        raise HTTPException(
+            status_code=422, 
+            detail={
+                "errors": {
+                    "slug": "Organization URL can only contain lowercase letters, numbers, and hyphens"
+                }
+            }
+        )
+    
+    # Check if slug is already taken
+    existing_org = OrganizationService.get_by_slug(slug)
+    if existing_org:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "errors": {
+                    "slug": f"The organization URL '{slug}' is already taken. Please choose another."
+                }
+            }
+        )
+    
     # Register user and create organization
     result = EnhancedAuthService.register_user(
         email=request.owner_email,
         name=request.owner_name,
         password=request.owner_password,
         organization_name=request.name,
-        organization_slug=request.slug
+        organization_slug=slug
     )
     
     if not result:
-        raise HTTPException(status_code=400, detail="Failed to create organization (email may exist or slug taken)")
+        raise HTTPException(
+            status_code=400, 
+            detail="Failed to create organization. Email may already be registered."
+        )
     
     return {
         "success": True,

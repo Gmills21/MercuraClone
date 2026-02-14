@@ -26,6 +26,7 @@ from app.database_sqlite import (
 from app.models import EmailStatus, InboundEmail, Quote, QuoteItem, QuoteStatus, WebhookPayload
 from app.organization_service import OrganizationService
 from app.services.gemini_service import gemini_service
+from app.security_utils import sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,9 @@ async def process_dedicated_email(payload: WebhookPayload, org_id: str) -> dict:
         for attachment in payload.attachments:
             try:
                 content_type = attachment.get('content-type', '').lower()
-                filename = attachment.get('filename', '')
+                raw_filename = attachment.get('filename', '')
+                # Sanitize filename for logging and context (not filesystem)
+                filename = sanitize_filename(raw_filename, allow_empty=True) or "attachment"
                 content = attachment.get('content', '')  # Base64 encoded
                 
                 logger.info(f"Processing attachment: {filename} ({content_type})")
@@ -348,8 +351,9 @@ async def email_webhook(
         attachment_file = form_data.get(f'attachment{i}')
         if attachment_file:
             content = base64.b64encode(await attachment_file.read()).decode()
+            safe_filename = sanitize_filename(attachment_file.filename) or "attachment"
             payload.attachments.append({
-                'filename': attachment_file.filename,
+                'filename': safe_filename,
                 'content-type': attachment_file.content_type,
                 'content': content
             })
@@ -360,8 +364,9 @@ async def email_webhook(
         attachment_file = form_data.get(f'attachment-{i}')
         if attachment_file:
             content = base64.b64encode(await attachment_file.read()).decode()
+            safe_filename = sanitize_filename(attachment_file.filename) or "attachment"
             payload.attachments.append({
-                'filename': attachment_file.filename,
+                'filename': safe_filename,
                 'content-type': attachment_file.content_type,
                 'content': content
             })

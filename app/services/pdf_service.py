@@ -24,6 +24,13 @@ except ImportError:
 
 from app.config import settings
 from app.database_sqlite import get_quote_with_items, get_organization
+from app.errors import (
+    AppError,
+    ErrorCategory,
+    ErrorSeverity,
+    MercuraException,
+    not_found
+)
 
 
 @dataclass
@@ -43,7 +50,17 @@ class PDFQuoteService:
     
     def __init__(self):
         if not REPORTLAB_AVAILABLE:
-            raise RuntimeError("PDF generation requires reportlab. Install with: pip install reportlab")
+            raise MercuraException(
+                AppError(
+                    category=ErrorCategory.INTERNAL_ERROR,
+                    code="PDF_LIBRARY_MISSING",
+                    message="PDF generation is not available. Required library is not installed.",
+                    severity=ErrorSeverity.ERROR,
+                    http_status=503,
+                    retryable=False,
+                    suggested_action="Contact support to enable PDF generation."
+                )
+            )
     
     def generate_quote_pdf(
         self,
@@ -65,7 +82,7 @@ class PDFQuoteService:
         # Fetch quote data
         quote = get_quote_with_items(quote_id, organization_id)
         if not quote:
-            raise ValueError(f"Quote {quote_id} not found")
+            raise MercuraException(not_found("Quote"))
         
         # Get org config for branding
         if organization_id and not config:
@@ -124,7 +141,7 @@ class PDFQuoteService:
         
         return pdf_bytes
     
-    def _create_styles(self, accent_color: str) -> Dict[str, ParagraphStyle]:
+    def _create_styles(self, accent_color: str) -> Dict[str, "ParagraphStyle"]:
         """Create paragraph styles for the PDF."""
         styles = getSampleStyleSheet()
         
@@ -185,7 +202,7 @@ class PDFQuoteService:
         self,
         quote: Dict[str, Any],
         config: PDFConfig,
-        styles: Dict[str, ParagraphStyle]
+        styles: Dict[str, "ParagraphStyle"]
     ) -> List[Any]:
         """Build the header section with company info."""
         elements = []
@@ -234,7 +251,7 @@ class PDFQuoteService:
     def _build_quote_info(
         self,
         quote: Dict[str, Any],
-        styles: Dict[str, ParagraphStyle]
+        styles: Dict[str, "ParagraphStyle"]
     ) -> List[Any]:
         """Build quote metadata section."""
         elements = []
@@ -296,7 +313,7 @@ class PDFQuoteService:
         self,
         quote: Dict[str, Any],
         config: PDFConfig,
-        styles: Dict[str, ParagraphStyle]
+        styles: Dict[str, "ParagraphStyle"]
     ) -> List[Any]:
         """Build the line items table."""
         elements = []
@@ -361,7 +378,7 @@ class PDFQuoteService:
         self,
         quote: Dict[str, Any],
         config: PDFConfig,
-        styles: Dict[str, ParagraphStyle]
+        styles: Dict[str, "ParagraphStyle"]
     ) -> List[Any]:
         """Build the totals section."""
         elements = []
@@ -408,7 +425,7 @@ class PDFQuoteService:
         self,
         quote: Dict[str, Any],
         config: PDFConfig,
-        styles: Dict[str, ParagraphStyle]
+        styles: Dict[str, "ParagraphStyle"]
     ) -> List[Any]:
         """Build footer with terms and notes."""
         elements = []

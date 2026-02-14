@@ -1,317 +1,298 @@
 """
-Smart Alerts Service - Refined
-Helpful notifications without the noise
+Smart Alerts Service - Production Ready
+Organization-scoped alerts with database persistence
 """
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
+import uuid
+from loguru import logger
+
+from app.database_sqlite import (
+    create_alert, list_alerts, get_unread_alert_count,
+    mark_alert_read, mark_all_alerts_read, dismiss_alert,
+    alert_exists, auto_resolve_alerts,
+    list_quotes, list_emails
+)
 
 
 class AlertType(str, Enum):
-    # Only the essentials - things that truly need attention
-    NEW_RFQ = "new_rfq"                    # Money on the table
-    FOLLOW_UP_NEEDED = "follow_up_needed"  # Deal going cold
-    QUOTE_EXPIRING = "quote_expiring"      # Time-sensitive
+    NEW_RFQ = "new_rfq"                    # New quote request received
+    FOLLOW_UP_NEEDED = "follow_up_needed"  # Quote needs follow-up
+    QUOTE_EXPIRING = "quote_expiring"      # Quote expires soon
+    LOW_MARGIN = "low_margin"              # Quote has low margin
+    PRICE_DISCREPANCY = "price_discrepancy"  # Price differs from catalog
 
 
 class AlertPriority(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
+    LOW = "low"
 
 
 @dataclass
 class Alert:
     id: str
+    organization_id: str
+    user_id: Optional[str]
     type: AlertType
     priority: AlertPriority
     title: str
     message: str
     created_at: datetime
-    read: bool = False
+    is_read: bool = False
     action_link: Optional[str] = None
     action_text: Optional[str] = None
+    related_entity_type: Optional[str] = None
+    related_entity_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        result = asdict(self)
-        result['created_at'] = self.created_at.isoformat()
-        return result
+        return {
+            "id": self.id,
+            "organization_id": self.organization_id,
+            "user_id": self.user_id,
+            "type": self.type.value,
+            "priority": self.priority.value,
+            "title": self.title,
+            "message": self.message,
+            "is_read": self.is_read,
+            "action_link": self.action_link,
+            "action_text": self.action_text,
+            "related_entity_type": self.related_entity_type,
+            "related_entity_id": self.related_entity_id,
+            "created_at": self.created_at.isoformat(),
+        }
 
 
 class AlertService:
     """
-    Minimal, helpful alerts.
+    Production-ready alert service.
     
     Principles:
-    1. Only alert on things that need action
-    2. One alert per event (no spam)
-    3. Actionable - every alert has a clear next step
-    4. Auto-resolve when situation changes
+    1. Organization-scoped - alerts are per organization
+    2. Database persisted - survives restarts
+    3. Auto-resolve - alerts clean themselves up
+    4. Actionable - every alert has a clear next step
     """
     
-    _alerts: Dict[str, List[Alert]] = {}
+    @classmethod
+    def get_user_alerts(
+        cls,
+        organization_id: str,
+        user_id: Optional[str] = None,
+        unread_only: bool = False,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Get alerts for an organization/user."""
+        return list_alerts(
+            organization_id=organization_id,
+            user_id=user_id,
+            unread_only=unread_only,
+            limit=limit
+        )
     
     @classmethod
-    def get_user_alerts(cls, user_id: str, unread_only: bool = False, limit: int = 20) -> List[Alert]:
-        """Get alerts - newest first, high priority first."""
-        alerts = cls._alerts.get(user_id, [])
-        
-        if unread_only:
-            alerts = [a for a in alerts if not a.read]
-        
-        # Sort: high priority first, then newest
-        priority_order = {AlertPriority.HIGH: 0, AlertPriority.MEDIUM: 1}
-        alerts = sorted(alerts, key=lambda a: (priority_order[a.priority], a.created_at), reverse=True)
-        
-        return alerts[:limit]
+    def get_unread_count(cls, organization_id: str, user_id: Optional[str] = None) -> int:
+        """Get unread alert count."""
+        return get_unread_alert_count(organization_id, user_id)
     
     @classmethod
-    def create_alert(cls, user_id: str, alert: Alert) -> Optional[Alert]:
-        """
-        Create alert only if user doesn't already have one for this thing.
-        Returns None if duplicate/unnecessary.
-        """
-        if user_id not in cls._alerts:
-            cls._alerts[user_id] = []
-        
-        # Check for duplicates
-        for existing in cls._alerts[user_id]:
-            if existing.id == alert.id and not existing.read:
-                return None  # Already have this alert
-        
-        cls._alerts[user_id].append(alert)
-        
-        # Keep last 50 alerts (trim old noise)
-        cls._alerts[user_id] = cls._alerts[user_id][-50:]
-        
-        return alert
-    
-    @classmethod
-    def mark_read(cls, user_id: str, alert_id: str) -> bool:
+    def mark_read(cls, organization_id: str, alert_id: str) -> bool:
         """Mark alert as read."""
-        for alert in cls._alerts.get(user_id, []):
-            if alert.id == alert_id:
-                alert.read = True
-                return True
-        return False
+        return mark_alert_read(alert_id, organization_id)
     
     @classmethod
-    def mark_all_read(cls, user_id: str) -> int:
-        """Mark all as read."""
-        count = 0
-        for alert in cls._alerts.get(user_id, []):
-            if not alert.read:
-                alert.read = True
-                count += 1
-        return count
+    def mark_all_read(cls, organization_id: str, user_id: Optional[str] = None) -> int:
+        """Mark all alerts as read."""
+        return mark_all_alerts_read(organization_id, user_id)
     
     @classmethod
-    def dismiss_alert(cls, user_id: str, alert_id: str) -> bool:
-        """Remove alert completely."""
-        alerts = cls._alerts.get(user_id, [])
-        cls._alerts[user_id] = [a for a in alerts if a.id != alert_id]
-        return True
+    def dismiss_alert(cls, organization_id: str, alert_id: str) -> bool:
+        """Dismiss an alert."""
+        return dismiss_alert(alert_id, organization_id)
+    
+    # ========== ALERT GENERATORS ==========
     
     @classmethod
-    def get_unread_count(cls, user_id: str) -> int:
-        """Count unread alerts."""
-        return len([a for a in cls._alerts.get(user_id, []) if not a.read])
-    
-    # ========== SMART ALERT GENERATORS ==========
-    
-    @classmethod
-    def check_new_rfqs(cls, user_id: str) -> List[Alert]:
-        """
-        Alert when new RFQ email arrives.
-        Only creates ONE alert per email.
-        """
-        from app.database_sqlite import list_extractions
-        
+    def check_new_rfqs(cls, organization_id: str) -> List[Dict[str, Any]]:
+        """Alert on new RFQ emails received in last 24 hours."""
         new_alerts = []
-        emails = list_extractions(status='pending', limit=10)
         
-        for email in emails:
-            alert_id = f"rfq_{email['id']}"
+        try:
+            emails = list_emails(organization_id=organization_id, limit=20)
             
-            # Skip if already alerted
-            if cls._alert_exists(user_id, alert_id):
-                continue
+            for email in emails:
+                # Skip if already alerted
+                if alert_exists(organization_id, AlertType.NEW_RFQ, email["id"]):
+                    continue
+                
+                # Only alert on emails received in last 24 hours
+                received = email.get("received_at") or email.get("created_at")
+                if received:
+                    try:
+                        received_dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
+                        if datetime.now() - received_dt > timedelta(hours=24):
+                            continue
+                    except:
+                        pass
+                
+                alert_data = {
+                    "id": str(uuid.uuid4()),
+                    "organization_id": organization_id,
+                    "user_id": None,
+                    "alert_type": AlertType.NEW_RFQ,
+                    "priority": AlertPriority.HIGH,
+                    "title": "New Quote Request",
+                    "message": f"{email.get('sender_email', 'A customer')} sent a new RFQ",
+                    "action_link": "/emails",
+                    "action_text": "View Email",
+                    "related_entity_type": "email",
+                    "related_entity_id": email["id"],
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+                
+                created = create_alert(alert_data)
+                if created:
+                    new_alerts.append(created)
+                    logger.info(f"Created NEW_RFQ alert for email {email['id']}")
+        
+        except Exception as e:
+            logger.error(f"Error checking for new RFQs: {e}")
+        
+        return new_alerts
+    
+    @classmethod
+    def check_follow_ups(cls, organization_id: str) -> List[Dict[str, Any]]:
+        """Alert on quotes that need follow-up (sent 3-7 days ago)."""
+        new_alerts = []
+        
+        try:
+            quotes = list_quotes(organization_id=organization_id, limit=100)
             
-            # Only alert on emails received in last 24 hours
-            received = email.get('received_at') or email.get('created_at')
-            if received:
+            for quote in quotes:
+                if quote.get("status") != "sent":
+                    continue
+                
+                sent_at = quote.get("sent_at") or quote.get("created_at")
+                if not sent_at:
+                    continue
+                
                 try:
-                    received_dt = datetime.fromisoformat(received.replace('Z', '+00:00'))
-                    if datetime.now() - received_dt > timedelta(hours=24):
-                        continue  # Too old, don't alert
+                    sent_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+                    days_since = (datetime.now() - sent_dt).days
                 except:
-                    pass
-            
-            alert = Alert(
-                id=alert_id,
-                type=AlertType.NEW_RFQ,
-                priority=AlertPriority.HIGH,
-                title="New Quote Request",
-                message=f"{email.get('from_name', 'A customer')} sent: {email.get('subject', 'New RFQ')[:50]}",
-                created_at=datetime.now(),
-                action_link="/inbox",
-                action_text="View Email"
-            )
-            
-            if cls.create_alert(user_id, alert):
-                new_alerts.append(alert)
+                    continue
+                
+                # Alert on 3-7 day window
+                if days_since < 3 or days_since > 7:
+                    continue
+                
+                # Skip if already alerted
+                if alert_exists(organization_id, AlertType.FOLLOW_UP_NEEDED, quote["id"]):
+                    continue
+                
+                alert_data = {
+                    "id": str(uuid.uuid4()),
+                    "organization_id": organization_id,
+                    "user_id": quote.get("assigned_user_id"),
+                    "alert_type": AlertType.FOLLOW_UP_NEEDED,
+                    "priority": AlertPriority.HIGH if days_since >= 5 else AlertPriority.MEDIUM,
+                    "title": "Follow-up Needed",
+                    "message": f"{quote.get('customer_name', 'Customer')} hasn't responded to ${quote.get('total', 0):,.0f} quote ({days_since} days)",
+                    "action_link": f"/quotes/{quote['id']}",
+                    "action_text": "Follow Up",
+                    "related_entity_type": "quote",
+                    "related_entity_id": quote["id"],
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+                
+                created = create_alert(alert_data)
+                if created:
+                    new_alerts.append(created)
+                    logger.info(f"Created FOLLOW_UP_NEEDED alert for quote {quote['id']}")
+        
+        except Exception as e:
+            logger.error(f"Error checking for follow-ups: {e}")
         
         return new_alerts
     
     @classmethod
-    def check_follow_ups(cls, user_id: str) -> List[Alert]:
-        """
-        Alert when quote needs follow-up.
-        Only for quotes sent 3-7 days ago (not too soon, not too late).
-        """
-        from app.database_sqlite import list_quotes
-        
+    def check_expiring_quotes(cls, organization_id: str) -> List[Dict[str, Any]]:
+        """Alert on quotes expiring in 7 days (21 days old)."""
         new_alerts = []
-        quotes = list_quotes(limit=50)
         
-        for quote in quotes:
-            sent_at = quote.get('sent_at') or quote.get('created_at')
-            if not sent_at:
-                continue
+        try:
+            quotes = list_quotes(organization_id=organization_id, limit=100)
             
-            try:
-                sent_dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
-                days_since = (datetime.now() - sent_dt).days
-            except:
-                continue
-            
-            # Only alert on 3-7 day window (sweet spot for follow-up)
-            if days_since < 3 or days_since > 7:
-                continue
-            
-            alert_id = f"followup_{quote['id']}"
-            
-            # Skip if already alerted
-            if cls._alert_exists(user_id, alert_id):
-                continue
-            
-            # Skip if quote was updated recently (they already followed up)
-            updated_at = quote.get('updated_at')
-            if updated_at:
+            for quote in quotes:
+                if quote.get("status") != "sent":
+                    continue
+                
+                sent_at = quote.get("sent_at") or quote.get("created_at")
+                if not sent_at:
+                    continue
+                
                 try:
-                    updated_dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-                    if datetime.now() - updated_dt < timedelta(days=1):
-                        continue  # They already touched this quote today
+                    sent_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+                    days_since = (datetime.now() - sent_dt).days
                 except:
-                    pass
-            
-            alert = Alert(
-                id=alert_id,
-                type=AlertType.FOLLOW_UP_NEEDED,
-                priority=AlertPriority.HIGH if days_since >= 5 else AlertPriority.MEDIUM,
-                title="Follow-up Needed",
-                message=f"{quote.get('customer_name', 'Customer')} hasn't responded to ${quote.get('total', 0):,.0f} quote ({days_since} days)",
-                created_at=datetime.now(),
-                action_link=f"/quotes/{quote['id']}",
-                action_text="Follow Up"
-            )
-            
-            if cls.create_alert(user_id, alert):
-                new_alerts.append(alert)
+                    continue
+                
+                # Alert at exactly 21 days (7 days before typical 30-day expiration)
+                if days_since != 21:
+                    continue
+                
+                # Skip if already alerted
+                if alert_exists(organization_id, AlertType.QUOTE_EXPIRING, quote["id"]):
+                    continue
+                
+                alert_data = {
+                    "id": str(uuid.uuid4()),
+                    "organization_id": organization_id,
+                    "user_id": quote.get("assigned_user_id"),
+                    "alert_type": AlertType.QUOTE_EXPIRING,
+                    "priority": AlertPriority.MEDIUM,
+                    "title": "Quote Expiring Soon",
+                    "message": f"{quote.get('customer_name', 'Customer')}'s ${quote.get('total', 0):,.0f} quote expires in 7 days",
+                    "action_link": f"/quotes/{quote['id']}",
+                    "action_text": "Renew Quote",
+                    "related_entity_type": "quote",
+                    "related_entity_id": quote["id"],
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+                
+                created = create_alert(alert_data)
+                if created:
+                    new_alerts.append(created)
+                    logger.info(f"Created QUOTE_EXPIRING alert for quote {quote['id']}")
+        
+        except Exception as e:
+            logger.error(f"Error checking for expiring quotes: {e}")
         
         return new_alerts
     
     @classmethod
-    def check_expiring_quotes(cls, user_id: str) -> List[Alert]:
-        """
-        Alert when quote is about to expire.
-        Only alert once, 7 days before expiration.
-        """
-        from app.database_sqlite import list_quotes
-        
-        new_alerts = []
-        quotes = list_quotes(limit=50)
-        
-        for quote in quotes:
-            sent_at = quote.get('sent_at') or quote.get('created_at')
-            if not sent_at:
-                continue
-            
-            try:
-                sent_dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
-                days_since = (datetime.now() - sent_dt).days
-            except:
-                continue
-            
-            # Alert at 21 days (7 days before typical 30-day expiration)
-            if days_since != 21:
-                continue
-            
-            alert_id = f"expiring_{quote['id']}"
-            
-            # Skip if already alerted
-            if cls._alert_exists(user_id, alert_id):
-                continue
-            
-            alert = Alert(
-                id=alert_id,
-                type=AlertType.QUOTE_EXPIRING,
-                priority=AlertPriority.MEDIUM,
-                title="Quote Expiring Soon",
-                message=f"{quote.get('customer_name', 'Customer')}'s ${quote.get('total', 0):,.0f} quote expires in 7 days",
-                created_at=datetime.now(),
-                action_link=f"/quotes/{quote['id']}",
-                action_text="Renew Quote"
-            )
-            
-            if cls.create_alert(user_id, alert):
-                new_alerts.append(alert)
-        
-        return new_alerts
-    
-    @classmethod
-    def run_all_checks(cls, user_id: str) -> Dict[str, Any]:
-        """Run all alert checks. Returns only NEW alerts created."""
+    def run_all_checks(cls, organization_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Run all alert checks and return new alerts created."""
         new_alerts = []
         
-        new_alerts.extend(cls.check_new_rfqs(user_id))
-        new_alerts.extend(cls.check_follow_ups(user_id))
-        new_alerts.extend(cls.check_expiring_quotes(user_id))
+        try:
+            new_alerts.extend(cls.check_new_rfqs(organization_id))
+            new_alerts.extend(cls.check_follow_ups(organization_id))
+            new_alerts.extend(cls.check_expiring_quotes(organization_id))
+            
+            # Auto-resolve alerts that no longer apply
+            resolved = auto_resolve_alerts(organization_id)
+            if resolved > 0:
+                logger.info(f"Auto-resolved {resolved} alerts for org {organization_id}")
         
-        # Auto-cleanup: Mark follow-up alerts as read if quote status changed
-        cls._auto_resolve_alerts(user_id)
+        except Exception as e:
+            logger.error(f"Error running alert checks: {e}")
         
         return {
             "new_alerts_count": len(new_alerts),
-            "total_unread": cls.get_unread_count(user_id),
-            "alerts": [a.to_dict() for a in new_alerts]
+            "total_unread": cls.get_unread_count(organization_id, user_id),
+            "alerts": new_alerts,
         }
-    
-    @classmethod
-    def _alert_exists(cls, user_id: str, alert_id: str) -> bool:
-        """Check if alert already exists and is unread."""
-        for alert in cls._alerts.get(user_id, []):
-            if alert.id == alert_id and not alert.read:
-                return True
-        return False
-    
-    @classmethod
-    def _auto_resolve_alerts(cls, user_id: str):
-        """
-        Automatically mark alerts as read when situation resolves.
-        - Follow-up alerts if quote status changes from 'sent'
-        """
-        from app.database_sqlite import get_quotes
-        
-        quotes = {q['id']: q for q in get_quotes(limit=100)}
-        
-        for alert in cls._alerts.get(user_id, []):
-            if alert.type == AlertType.FOLLOW_UP_NEEDED and not alert.read:
-                # Extract quote ID from alert ID (followup_{quote_id})
-                quote_id = alert.id.replace("followup_", "")
-                quote = quotes.get(quote_id)
-                
-                if quote and quote.get('status') != 'sent':
-                    # Quote status changed - auto-resolve
-                    alert.read = True

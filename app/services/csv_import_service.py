@@ -7,6 +7,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from io import StringIO
 import csv
 from dataclasses import dataclass
+from app.errors import (
+    ValidationException,
+    validation_error
+)
 
 # Try to import pandas for better CSV handling
 try:
@@ -123,7 +127,12 @@ class CSVImportService:
             try:
                 text_content = file_content.decode('latin-1')
             except:
-                raise ValueError("Unable to decode file. Please ensure it's a valid CSV or Excel file.")
+                raise ValidationException(
+                    validation_error(
+                        field="file",
+                        message="Unable to decode file. Please ensure it's a valid CSV or Excel file encoded in UTF-8 or Latin-1."
+                    )
+                )
         
         # Detect delimiter if not specified
         if not delimiter:
@@ -319,6 +328,8 @@ class CSVImportService:
                 warnings=warnings
             )
             
+        except ValidationException:
+            raise
         except Exception as e:
             return ImportResult(
                 success=False,
@@ -392,6 +403,8 @@ class CSVImportService:
                 warnings=[]
             )
             
+        except ValidationException:
+            raise
         except Exception as e:
             return ImportResult(False, 0, 0, [str(e)], [])
 

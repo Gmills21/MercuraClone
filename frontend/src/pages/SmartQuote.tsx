@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Loader2, AlertCircle, CheckCircle2, TrendingUp, History, Package, ArrowRight, Send, Edit3, PlusCircle, Check, Trash2, Plus, ListChecks, FileText, ChevronDown } from 'lucide-react';
 import { quotesApi, customersApi, productsApi, extractionsApi, api, projectsApi, organizationsApi } from '../services/api';
@@ -35,6 +35,10 @@ export const SmartQuote = () => {
   const [newProjectAddress, setNewProjectAddress] = useState('');
   const [assignees, setAssignees] = useState<any[]>([]);
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>('');
+
+  // Race condition prevention
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitAttempted = useRef(false);
 
   // Manage object URL for file preview
   useEffect(() => {
@@ -170,9 +174,17 @@ export const SmartQuote = () => {
 
       setLineItems(smartItems);
       setStep('review');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Extraction failed:', error);
-      alert('Extraction failed. Please try again or enter items manually.');
+
+      // CRITICAL FIX: Handle timeout errors specifically
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        alert('Extraction timed out. The file may be too large or complex. Try:\n• Using a smaller file\n• Entering items manually\n• Breaking the document into smaller sections');
+      } else if (error.response?.status === 429) {
+        alert('Too many requests. Please wait a moment and try again.');
+      } else {
+        alert('Extraction failed. Please try again or enter items manually.');
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -193,8 +205,10 @@ export const SmartQuote = () => {
       // Generate pricing insights
       const insights = generatePricingInsights(matchedProduct, basePrice, customer);
 
+      // CRITICAL FIX: Use crypto.randomUUID() for stable unique IDs
+      // This prevents React key conflicts when items are deleted/reordered
       return {
-        id: `item-${index}`,
+        id: crypto.randomUUID(), // ✅ Stable unique ID instead of index-based
         extracted_name: item.item_name,
         extracted_qty: quantity,
         product: matchedProduct,
@@ -275,6 +289,10 @@ export const SmartQuote = () => {
 
   // Update line item price
   const updatePrice = (itemId: string, newPrice: number) => {
+    // Validate: price cannot be negative
+    if (newPrice < 0) {
+      return;
+    }
     setLineItems(items =>
       items.map(item => {
         if (item.id === itemId) {
@@ -282,6 +300,26 @@ export const SmartQuote = () => {
             ...item,
             unit_price: newPrice,
             total: item.quantity * newPrice,
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  // Update line item quantity
+  const updateQuantity = (itemId: string, newQuantity: number) => {
+    // Validate: quantity must be greater than 0
+    if (newQuantity <= 0) {
+      return;
+    }
+    setLineItems(items =>
+      items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            quantity: newQuantity,
+            total: newQuantity * item.unit_price,
           };
         }
         return item;
@@ -297,11 +335,24 @@ export const SmartQuote = () => {
     return { subtotal, taxAmount, total };
   };
 
-  // Send quote
+  // Send quote with race condition protection
   const handleSendQuote = async () => {
+    // Prevent double submission
+    if (isSubmitting || submitAttempted.current) {
+      console.log('Quote submission already in progress, ignoring duplicate request');
+      return;
+    }
+
     if ((!selectedCustomer && !isNewCustomer) || lineItems.length === 0) return;
 
+    // Mark submission as started
+    setIsSubmitting(true);
+    submitAttempted.current = true;
     setStep('sending');
+
+    // Generate idempotency key for this submission
+    const idempotencyKey = `quote-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     try {
       let finalCustomer = selectedCustomer;
 
@@ -348,7 +399,7 @@ export const SmartQuote = () => {
         notes: `Extracted from: ${inputText.slice(0, 100)}...`,
       };
 
-      const res = await quotesApi.create(quoteData);
+      const res = await quotesApi.create(quoteData, idempotencyKey);
 
       trackEvent('quote_created', {
         quote_id: res.data.id,
@@ -367,10 +418,24 @@ export const SmartQuote = () => {
 
       // Success! Navigate to quote view
       navigate(`/quotes/${res.data.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send quote:', error);
-      alert('Failed to send quote. Please try again.');
+
+      // Check if it's a duplicate submission (already processed)
+      if (error.response?.status === 409) {
+        alert('This quote was already submitted. Check your quotes list.');
+        navigate('/quotes');
+      } else {
+        alert('Failed to send quote. Please try again.');
+      }
+
       setStep('review');
+    } finally {
+      // Reset submission state after delay to prevent immediate re-submission
+      setTimeout(() => {
+        setIsSubmitting(false);
+        submitAttempted.current = false;
+      }, 2000);
     }
   };
 
@@ -792,9 +857,11 @@ export const SmartQuote = () => {
                             <span className="text-sm text-gray-600">Qty:</span>
                             <input
                               type="number"
+                              min="1"
+                              step="1"
                               value={item.quantity}
-                              readOnly
-                              className="w-20 px-2 py-1 border border-gray-300 rounded text-center"
+                              onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 1)}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded text-center focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                             />
                           </div>
 
@@ -804,6 +871,7 @@ export const SmartQuote = () => {
                               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
                               <input
                                 type="number"
+                                min="0"
                                 step="0.01"
                                 value={item.unit_price}
                                 onChange={(e) => updatePrice(item.id, parseFloat(e.target.value))}
@@ -933,8 +1001,16 @@ export const SmartQuote = () => {
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
                       value={taxRate}
-                      onChange={(e) => setTaxRate(parseFloat(e.target.value))}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value);
+                        if (!isNaN(value) && value >= 0 && value <= 100) {
+                          setTaxRate(value);
+                        }
+                      }}
                       className="w-16 px-3 py-1.5 border-minimal rounded-lg text-right text-sm shadow-soft"
                     />
                     <span className="text-slate-400">%</span>

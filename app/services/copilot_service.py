@@ -8,8 +8,6 @@ from datetime import datetime
 import json
 from loguru import logger
 
-from app.services.extraction_engine import extraction_engine
-from app.services.rag_service import rag_service
 from app.database_sqlite import get_quote_with_items, list_products
 
 
@@ -34,6 +32,9 @@ class CopilotService:
     """
     
     def __init__(self):
+        from app.services.extraction_engine import extraction_engine
+        from app.services.rag_service import rag_service
+        
         self.extraction_engine = extraction_engine
         self.rag_service = rag_service
         logger.info("Copilot service initialized")

@@ -109,7 +109,7 @@ export const CustomerIntelligence = () => {
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6 py-6">
           <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-            <button onClick={() => navigate('/customers')} className="hover:text-gray-700">Customers</button>
+            <button type="button" onClick={() => navigate('/customers')} className="hover:text-gray-700 cursor-pointer">Customers</button>
             <ChevronRight size={14} />
             <span className="text-gray-900">Intelligence</span>
           </div>
@@ -139,8 +139,9 @@ export const CustomerIntelligence = () => {
             </div>
             
             <button
+              type="button"
               onClick={() => navigate(`/quotes/new?customer=${customerId}`)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors"
+              className="flex items-center gap-2 px-5 py-2.5 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors cursor-pointer"
             >
               <Zap size={18} />
               Create Quote
@@ -245,8 +246,9 @@ export const CustomerIntelligence = () => {
                       
                       <div className="mt-4">
                         <button
+                          type="button"
                           onClick={() => navigate(insight.action_link)}
-                          className="inline-flex items-center gap-1 text-sm font-medium text-orange-600 hover:text-orange-700"
+                          className="inline-flex items-center gap-1 text-sm font-medium text-orange-600 hover:text-orange-700 cursor-pointer"
                         >
                           {insight.action}
                           <ArrowRight size={14} />
@@ -351,24 +353,27 @@ export const CustomerIntelligence = () => {
               <h2 className="font-semibold text-gray-900 mb-4">Quick Actions</h2>
               <div className="space-y-2">
                 <button
+                  type="button"
                   onClick={() => navigate(`/quotes?customer=${customerId}`)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg hover:bg-gray-50 border border-gray-200 hover:border-gray-300 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg hover:bg-gray-50 border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer"
                 >
                   <Clock size={18} className="text-gray-400" />
                   <span className="font-medium text-gray-700">View Quote History</span>
                 </button>
                 
                 <button
+                  type="button"
                   onClick={() => navigate(`/customers/${customerId}`)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg hover:bg-gray-50 border border-gray-200 hover:border-gray-300 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg hover:bg-gray-50 border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer"
                 >
                   <Phone size={18} className="text-gray-400" />
                   <span className="font-medium text-gray-700">Contact Details</span>
                 </button>
                 
                 <button
+                  type="button"
                   onClick={() => navigate(`/quotes/new?customer=${customerId}`)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg bg-orange-50 border border-orange-200 hover:bg-orange-100 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left rounded-lg bg-orange-50 border border-orange-200 hover:bg-orange-100 transition-colors cursor-pointer"
                 >
                   <Star size={18} className="text-orange-500" />
                   <span className="font-medium text-orange-700">Create New Quote</span>

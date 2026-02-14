@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Clock, TrendingUp, Users, FileText, Mail, Sparkles,
-  Calendar, Target, Zap, ArrowRight, Activity, Globe, ShieldCheck
+  Calendar, Target, Zap, ArrowRight, Activity, Globe, ShieldCheck,
+  Upload, Database
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { quotesApi, customersApi, emailsApi } from '../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { quotesApi, customersApi, emailsApi, demoDataApi } from '../services/api';
 import { queryKeys } from '../lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -144,9 +145,54 @@ const usePriorityTasks = (emails: any[], followUpQuotes: any[]) => {
   }, [emails, followUpQuotes]);
 };
 
+// Empty State Component
+function EmptyState({ onUpload, onDemo, isLoading }: { onUpload: () => void; onDemo: () => void; isLoading: boolean }) {
+  return (
+    <div className="py-12 px-8">
+      <div className="text-center max-w-md mx-auto">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-100 to-amber-100 text-orange-600 mb-4">
+          <Database size={32} />
+        </div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Welcome to Mercura!</h3>
+        <p className="text-gray-600 mb-6">
+          Get started by uploading your first RFQ or try our demo data to see how it works.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={onUpload}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors"
+          >
+            <Upload size={18} />
+            Upload Your First RFQ
+          </button>
+          <button
+            onClick={onDemo}
+            disabled={isLoading}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="animate-spin" size={18} />
+                Loading...
+              </>
+            ) : (
+              <>
+                <Sparkles size={18} className="text-orange-500" />
+                Try Demo Data
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const TodayView = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [greeting, setGreeting] = useState('');
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
   
   const { quotes, emails, isLoading, isError, error, refetch } = useDashboardData();
   
@@ -405,8 +451,23 @@ export const TodayView = () => {
                 <tbody className="divide-y divide-gray-50">
                   {quotes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-12 text-center text-gray-500">
-                        No quote activity yet.
+                      <td colSpan={5}>
+                        <EmptyState 
+                          onUpload={() => navigate('/emails')}
+                          onDemo={async () => {
+                            setIsLoadingDemo(true);
+                            try {
+                              await demoDataApi.load();
+                              queryClient.invalidateQueries({ queryKey: queryKeys.quotes.list() });
+                              queryClient.invalidateQueries({ queryKey: queryKeys.customers.list() });
+                            } catch (err) {
+                              console.error('Failed to load demo data:', err);
+                            } finally {
+                              setIsLoadingDemo(false);
+                            }
+                          }}
+                          isLoading={isLoadingDemo}
+                        />
                       </td>
                     </tr>
                   ) : (

@@ -3,7 +3,7 @@ Billing and Subscription models for B2B SaaS.
 Supports per-seat pricing with Paddle as Merchant of Record.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr, HttpUrl
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -40,20 +40,24 @@ class SubscriptionPlan(BaseModel):
 
 
 class Subscription(BaseModel):
-    """User subscription record."""
+    """Subscription record. DB (SQLite) uses organization_id, seats_total, seats_used, trial_ends_at."""
     id: Optional[str] = None
-    user_id: str
+    organization_id: Optional[str] = None  # SQLite schema (org-scoped billing)
+    user_id: Optional[str] = None  # Legacy/Supabase schema
     plan_id: str
     paddle_subscription_id: Optional[str] = None
     paddle_customer_id: Optional[str] = None
     status: SubscriptionStatus = SubscriptionStatus.TRIAL
-    seats: int = 1  # Number of sales reps/seats
+    seats: Optional[int] = None  # Legacy alias; prefer seats_total
+    seats_total: Optional[int] = 1  # DB column: number of seats
+    seats_used: Optional[int] = 0   # DB column: active count
     price_per_seat: float
-    total_amount: float  # seats * price_per_seat
+    total_amount: float
     billing_interval: BillingInterval = BillingInterval.MONTHLY
     current_period_start: datetime = Field(default_factory=datetime.utcnow)
     current_period_end: Optional[datetime] = None
-    trial_end: Optional[datetime] = None
+    trial_end: Optional[datetime] = None   # Legacy alias; DB column is trial_ends_at
+    trial_ends_at: Optional[datetime] = None  # DB column
     cancel_at_period_end: bool = False
     canceled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -62,19 +66,25 @@ class Subscription(BaseModel):
 
 
 class Invoice(BaseModel):
-    """Invoice record for billing."""
+    """Invoice record. DB (SQLite) has organization_id, created_at, period_start, period_end; no user_id/invoice_date/due_date columns."""
     id: Optional[str] = None
-    subscription_id: str
-    user_id: str
+    organization_id: Optional[str] = None  # SQLite schema
+    subscription_id: Optional[str] = None
+    user_id: Optional[str] = None  # Not in SQLite schema; optional for API compat
     paddle_invoice_id: Optional[str] = None
-    invoice_number: str
+    paddle_payment_id: Optional[str] = None  # DB column name
+    invoice_number: Optional[str] = None
     amount: float
     currency: str = "USD"
-    status: str  # 'draft', 'open', 'paid', 'void', 'uncollectible'
-    invoice_date: datetime = Field(default_factory=datetime.utcnow)
-    due_date: Optional[datetime] = None
+    status: str
+    invoice_date: Optional[datetime] = None  # Not in SQLite; use created_at
+    due_date: Optional[datetime] = None     # Not in SQLite; use period_end
     paid_at: Optional[datetime] = None
+    period_start: Optional[datetime] = None  # DB column
+    period_end: Optional[datetime] = None   # DB column
     invoice_pdf_url: Optional[str] = None
+    pdf_url: Optional[str] = None  # DB column
+    receipt_url: Optional[str] = None  # DB column
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: Optional[Dict[str, Any]] = None
 
@@ -136,17 +146,21 @@ class UsageRecord(BaseModel):
 
 # Request/Response Models
 
+
+
+# Request/Response Models
+
 class CreateSubscriptionRequest(BaseModel):
     """Request to create a new subscription."""
     plan_id: str
-    seats: int = 1
+    seats: int = Field(default=1, gt=0, description="Number of seats, must be positive")
     billing_interval: BillingInterval = BillingInterval.MONTHLY
     payment_method_id: Optional[str] = None
 
 
 class UpdateSubscriptionRequest(BaseModel):
     """Request to update subscription."""
-    seats: Optional[int] = None
+    seats: Optional[int] = Field(None, gt=0, description="New seat count, must be positive")
     plan_id: Optional[str] = None
     cancel_at_period_end: Optional[bool] = None
 
@@ -154,10 +168,12 @@ class UpdateSubscriptionRequest(BaseModel):
 class CheckoutSessionRequest(BaseModel):
     """Request to create a Paddle checkout session."""
     plan_id: str
-    seats: int = 1
+    seats: int = Field(default=1, gt=0, description="Number of seats, must be positive")
+    customer_email: Optional[EmailStr] = Field(None, description="Customer email address")
+    customer_name: Optional[str] = None
     billing_interval: BillingInterval = BillingInterval.MONTHLY
-    success_url: str
-    cancel_url: str
+    success_url: Optional[HttpUrl] = None
+    cancel_url: Optional[HttpUrl] = None
 
 
 class CheckoutSessionResponse(BaseModel):
@@ -168,12 +184,19 @@ class CheckoutSessionResponse(BaseModel):
 
 class BillingPortalRequest(BaseModel):
     """Request to create a billing portal session."""
-    return_url: str
+    return_url: Optional[HttpUrl] = Field(default="/account/billing", description="Return URL after portal actions")
 
 
 class BillingPortalResponse(BaseModel):
     """Response with billing portal URL."""
     portal_url: str
+
+
+class AssignSeatRequest(BaseModel):
+    """Request to assign a seat."""
+    sales_rep_email: EmailStr = Field(..., description="Email of the user to assign seat to")
+    sales_rep_name: Optional[str] = None
+
 
 
 # Database Schema for Supabase

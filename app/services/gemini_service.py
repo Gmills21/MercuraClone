@@ -9,6 +9,11 @@ import base64
 import time
 import logging
 from typing import Dict, Any, Optional
+from app.errors import (
+    AIServiceException,
+    ai_service_unavailable,
+    ai_extraction_failed
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +37,12 @@ class GeminiService:
     def __init__(self):
         """Initialize Gemini model."""
         if not GEMINI_AVAILABLE:
-            raise RuntimeError("Gemini service not available. Install google-generativeai>=0.3.2")
+            raise AIServiceException(
+                ai_service_unavailable(
+                    provider="Gemini",
+                    detail="google-generativeai library not installed or version too old. Need >=0.3.2"
+                )
+            )
         
         print(f"Gemini model from settings: {settings.gemini_model}")
         self.model = genai.GenerativeModel(model_name=settings.gemini_model)
@@ -137,19 +147,23 @@ Now analyze the provided document and return the extracted data as valid JSON:""
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=f"Invalid JSON response: {str(e)}"
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="Gemini",
+                    detail=f"Invalid JSON response: {str(e)}",
+                    context=context
+                ),
+                original_exception=e
             )
         except Exception as e:
             logger.error(f"Extraction error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=str(e)
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="Gemini",
+                    detail=str(e),
+                    context=context
+                ),
+                original_exception=e
             )
     
     async def extract_from_pdf(
@@ -211,11 +225,13 @@ Now analyze the provided document and return the extracted data as valid JSON:""
             
         except Exception as e:
             logger.error(f"PDF extraction error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=str(e)
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="Gemini",
+                    detail=f"PDF extraction failed: {str(e)}",
+                    context=context
+                ),
+                original_exception=e
             )
     
     async def extract_from_image(
@@ -287,11 +303,13 @@ Now analyze the provided document and return the extracted data as valid JSON:""
             
         except Exception as e:
             logger.error(f"Image extraction error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=str(e)
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="Gemini",
+                    detail=f"Image extraction failed: {str(e)}",
+                    context=context
+                ),
+                original_exception=e
             )
     
     def _calculate_confidence(self, line_items: list) -> float:

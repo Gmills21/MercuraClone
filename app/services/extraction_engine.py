@@ -50,6 +50,8 @@ except ImportError:
 from app.ai_provider_service import get_ai_service, extract_structured_data
 from app.services.langextract.docling_parser import DoclingParser
 from app.posthog_utils import capture_event
+from app.errors import ai_extraction_failed, ai_service_unavailable
+from app.utils.resilience import with_timeout, TimeoutError
 import time
 import os
 
@@ -322,6 +324,12 @@ class ExtractionEngine:
                      user_id: str = "anonymous") -> Dict[str, Any]:
         """
         Universal extraction method - handles text, image, PDF, Excel
+        
+        Features:
+        - Timeout protection (60 seconds max)
+        - User-friendly error messages
+        - Graceful degradation when AI is unavailable
+        - Detailed error tracking
         """
         start_time = time.time()
         
@@ -338,27 +346,36 @@ class ExtractionEngine:
         )
         
         result = None
-        if file_data and filename:
-            ext = filename.lower().split('.')[-1]
-            if ext in ['pdf']:
-                result = await self.extract_from_pdf(file_data, filename)
-            elif ext in ['xlsx', 'xls', 'csv']:
-                result = await self.extract_from_xlsx(file_data, filename)
-            elif ext in ['docx', 'pptx', 'html', 'htm', 'md', 'txt']:
-                result = await self.extract_from_document(file_data, filename)
-            elif ext in ['jpg', 'jpeg', 'png', 'webp']:
-                result = await self.extract_from_image(file_data, filename)
-            else:
-                # If Docling is available, let it try unknown formats first
-                if self.docling_parser.converter:
-                    result = await self.extract_from_document(file_data, filename)
-                else:
-                    # Fallback to OCR if it's an unrecognized file that might be an image
-                    result = await self.extract_from_image(file_data, filename)
-        elif text:
-            result = await self.extract_from_text(text, source_type)
-        else:
-            result = self._empty_result("No text or file provided")
+        
+        try:
+            # Apply timeout protection
+            result = await with_timeout(
+                self._extract_with_fallback(text, file_data, filename, source_type),
+                timeout_seconds=60.0,
+                timeout_message="Extraction took too long. Try a smaller file or different format."
+            )
+        except TimeoutError as e:
+            logger.warning(f"Extraction timeout: {e}")
+            result = {
+                "success": False,
+                "error": str(e),
+                "error_code": "EXTRACTION_TIMEOUT",
+                "retryable": True,
+                "suggested_action": "Try uploading a smaller file, converting to PDF, or typing the information directly.",
+                "structured_data": self._empty_structure(),
+                "confidence": 0.0
+            }
+        except Exception as e:
+            logger.exception(f"Unexpected extraction error: {e}")
+            result = {
+                "success": False,
+                "error": "An unexpected error occurred while processing your file.",
+                "error_code": "EXTRACTION_ERROR",
+                "retryable": True,
+                "suggested_action": "Please try again. If the problem persists, contact support.",
+                "structured_data": self._empty_structure(),
+                "confidence": 0.0
+            }
             
         duration = time.time() - start_time
         
@@ -376,6 +393,36 @@ class ExtractionEngine:
         )
         
         return result
+    
+    async def _extract_with_fallback(
+        self,
+        text: Optional[str],
+        file_data: Optional[bytes],
+        filename: Optional[str],
+        source_type: str
+    ) -> Dict[str, Any]:
+        """Internal extraction with format fallback logic."""
+        if file_data and filename:
+            ext = filename.lower().split('.')[-1]
+            if ext in ['pdf']:
+                return await self.extract_from_pdf(file_data, filename)
+            elif ext in ['xlsx', 'xls', 'csv']:
+                return await self.extract_from_xlsx(file_data, filename)
+            elif ext in ['docx', 'pptx', 'html', 'htm', 'md', 'txt']:
+                return await self.extract_from_document(file_data, filename)
+            elif ext in ['jpg', 'jpeg', 'png', 'webp']:
+                return await self.extract_from_image(file_data, filename)
+            else:
+                # If Docling is available, let it try unknown formats first
+                if self.docling_parser.converter:
+                    return await self.extract_from_document(file_data, filename)
+                else:
+                    # Fallback to OCR if it's an unrecognized file that might be an image
+                    return await self.extract_from_image(file_data, filename)
+        elif text:
+            return await self.extract_from_text(text, source_type)
+        else:
+            return self._empty_result("No text or file provided", "NO_INPUT")
     
     async def _run_ocr(self, image_data: bytes) -> str:
         """Run OCR on image data."""
@@ -735,20 +782,27 @@ class ExtractionEngine:
         # Could add date parsing here
         return date
     
-    def _empty_result(self, error_message: str) -> Dict[str, Any]:
-        """Return empty result with error."""
+    def _empty_structure(self) -> Dict[str, Any]:
+        """Return empty structure for failed extractions."""
+        return {
+            "customer_name": None,
+            "contact_email": None,
+            "contact_phone": None,
+            "line_items": [],
+            "delivery_date": None,
+            "delivery_location": None,
+            "special_instructions": None
+        }
+    
+    def _empty_result(self, error_message: str, error_code: str = "EXTRACTION_FAILED") -> Dict[str, Any]:
+        """Return empty result with error and user-friendly messaging."""
         return {
             "success": False,
             "error": error_message,
-            "structured_data": {
-                "customer_name": None,
-                "contact_email": None,
-                "contact_phone": None,
-                "line_items": [],
-                "delivery_date": None,
-                "delivery_location": None,
-                "special_instructions": None
-            },
+            "error_code": error_code,
+            "retryable": True,
+            "suggested_action": "Try uploading a clearer image, converting to PDF, or typing the information directly.",
+            "structured_data": self._empty_structure(),
             "confidence": 0.0
         }
 

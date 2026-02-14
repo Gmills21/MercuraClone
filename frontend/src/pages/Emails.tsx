@@ -373,15 +373,17 @@ export const Emails = () => {
                                                                     {quotes.map((quote: any) => (
                                                                         <div key={quote.id} className="flex items-center gap-1">
                                                                             <button
+                                                                                type="button"
                                                                                 onClick={() => navigate(`/quotes/${quote.id}`)}
-                                                                                className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                                                                                className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
                                                                                 title="View Quote"
                                                                             >
                                                                                 <Eye size={14} />
                                                                             </button>
                                                                             <button
+                                                                                type="button"
                                                                                 onClick={() => handleDownloadQuote(quote.id, quote.quote_number)}
-                                                                                className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                                                                                className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
                                                                                 title="Download Quote"
                                                                             >
                                                                                 <Download size={14} />

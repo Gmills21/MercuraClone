@@ -14,8 +14,9 @@ async def get_current_organization(
         session = SessionService.validate_session(token)
         if session:
             return session.get("organization_id")
-    if x_user_id:
-        return get_or_create_default_organization()
+    # Removed dangerous fallback
+    # if x_user_id:
+    #     return get_or_create_default_organization()
     raise HTTPException(401, "Missing authorization")
 
 
@@ -29,7 +30,8 @@ async def get_current_user_and_org(
         session = SessionService.validate_session(token)
         if session:
             return session["user_id"], session["organization_id"]
-    if x_user_id:
-        org_id = get_or_create_default_organization()
-        return x_user_id, org_id
+    # Removed dangerous fallback
+    # if x_user_id:
+    #     org_id = get_or_create_default_organization()
+    #     return x_user_id, org_id
     raise HTTPException(401, "Missing authorization")

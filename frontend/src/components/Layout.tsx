@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, FileText, Users, Package, LogOut, Inbox, 
   Target, CreditCard, BarChart3, Brain, Shield, Briefcase, 
-  ChevronDown, MoreHorizontal, Settings, Search, Sparkles, Command 
+  ChevronDown, MoreHorizontal, Settings, Search, Sparkles, Command,
+  UserCog, Mail, Bell, Globe
 } from 'lucide-react';
 import clsx from 'clsx';
 import { NotificationCenter } from './NotificationCenter';
@@ -219,13 +220,29 @@ const UserMenu: React.FC = () => {
                 <span>Security & Privacy</span>
               </Link>
               <Link
+                to="/account/email"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 text-sm w-full text-slate-600 hover:bg-slate-50"
+              >
+                <Mail size={16} className="text-slate-500" />
+                <span>Email Settings</span>
+              </Link>
+              <Link
+                to="/account/domain"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 text-sm w-full text-slate-600 hover:bg-slate-50"
+              >
+                <Globe size={16} className="text-slate-500" />
+                <span>Custom Domain</span>
+              </Link>
+              <Link
                 to="/account/billing"
                 onClick={() => setIsOpen(false)}
                 onMouseEnter={prefetchBilling}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 text-sm w-full text-slate-600 hover:bg-slate-50"
               >
                 <Settings size={16} className="text-slate-500" />
-                <span>Account Settings</span>
+                <span>Account & Billing</span>
               </Link>
             </div>
             <div className="border-t border-slate-100 p-2">
@@ -476,6 +493,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
           </div>
           <SidebarItem 
+            icon={Bell} 
+            label="Alerts" 
+            to="/alerts" 
+            badge={3}
+          />
+          <SidebarItem 
             icon={CreditCard} 
             label="Integrations" 
             to="/quickbooks" 
@@ -484,6 +507,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             icon={BarChart3} 
             label="Analytics" 
             to="/intelligence" 
+          />
+          <SidebarItem 
+            icon={UserCog} 
+            label="Team" 
+            to="/team" 
           />
 
           {/* More dropdown for secondary tools */}

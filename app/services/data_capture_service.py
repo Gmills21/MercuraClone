@@ -6,14 +6,44 @@ Free implementation using DeepSeek/OpenRouter API
 import json
 import logging
 import time
+import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import httpx
 from app.config import settings
-from app.database import db
 from app.models import ExtractionResponse, LineItem
+from app.utils.resilience import (
+    with_retry,
+    RetryConfig,
+    CircuitBreaker,
+    CircuitBreakerOpen
+)
+from app.errors import (
+    AppError,
+    ErrorCategory,
+    ErrorSeverity,
+    AIServiceException,
+    ai_extraction_failed,
+    ai_service_unavailable,
+    classify_exception,
+    ValidationException,
+    validation_error
+)
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for AI API calls
+AI_RETRY_CONFIG = RetryConfig(
+    max_attempts=3,
+    base_delay=2.0,
+    max_delay=30.0,
+    retryable_exceptions=[
+        httpx.TimeoutException,
+        httpx.ConnectError,
+        httpx.NetworkError,
+        httpx.HTTPStatusError
+    ]
+)
 
 
 class DataCaptureService:
@@ -25,6 +55,8 @@ class DataCaptureService:
         self.api_key = self.api_keys[0] if self.api_keys else (settings.openrouter_api_key or settings.deepseek_api_key)
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = getattr(settings, "openrouter_model", "deepseek/deepseek-chat")
+        self.circuit_breaker = CircuitBreaker("openrouter")
+        self.timeout_seconds = 60.0
     
     def _rotate_key(self) -> bool:
         """Rotate to the next available API key. Returns True if successful."""
@@ -114,47 +146,51 @@ Extract the data and return ONLY valid JSON:"""
             "max_tokens": 4000
         }
         
+        if self.circuit_breaker.is_open:
+            logger.warning("OpenRouter circuit breaker open, extraction may fail")
+            return ExtractionResponse(
+                success=False,
+                line_items=[],
+                confidence_score=0.0,
+                error="AI service temporarily unavailable due to recent errors. Please try again in a few minutes."
+            )
+        
         try:
-            # Call OpenRouter/DeepSeek API with retries
-            max_retries = min(len(self.api_keys), 3) if self.api_keys else 1
-            current_retry = 0
-            raw_text = None
-            
-            while current_retry <= max_retries:
-                try:
-                    headers = {
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://openmercura.local",
-                        "X-Title": "OpenMercura"
-                    }
+            # Use resilience framework with key rotation fallback
+            @self.circuit_breaker.protect
+            async def _make_api_call():
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://openmercura.local",
+                    "X-Title": "OpenMercura"
+                }
+                
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(
+                        self.api_url,
+                        headers=headers,
+                        json=payload
+                    )
                     
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        response = await client.post(
-                            self.api_url,
-                            headers=headers,
-                            json=payload
-                        )
-                        
-                        if response.status_code == 429 or response.status_code >= 500:
-                            if self._rotate_key():
-                                logger.warning(f"OpenRouter API limit/error ({response.status_code}). Rotating key... ({current_retry}/{max_retries})")
-                                current_retry += 1
-                                continue
-                        
-                        response.raise_for_status()
-                        data = response.json()
-                        raw_text = data["choices"][0]["message"]["content"]
-                        break
-                except httpx.HTTPError as e:
-                    if current_retry < max_retries and self._rotate_key():
-                        logger.warning(f"OpenRouter HTTP error: {e}. Rotating key... ({current_retry}/{max_retries})")
-                        current_retry += 1
-                        continue
-                    raise e
-
-            if not raw_text:
-                raise Exception("Failed to generate content from OpenRouter after retries")
+                    # Handle rate limiting with key rotation
+                    if response.status_code == 429:
+                        if self._rotate_key():
+                            logger.warning("Rate limited, rotated to next API key")
+                            # Update headers with new key
+                            headers["Authorization"] = f"Bearer {self.api_key}"
+                            # Retry with new key
+                            response = await client.post(
+                                self.api_url,
+                                headers=headers,
+                                json=payload
+                            )
+                    
+                    response.raise_for_status()
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
+            
+            raw_text = await with_retry(_make_api_call, config=AI_RETRY_CONFIG)
 
             # Clean up the response
             raw_text = self._clean_json_response(raw_text)
@@ -187,27 +223,30 @@ Extract the data and return ONLY valid JSON:"""
                 
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=f"Invalid JSON response: {str(e)}"
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="OpenRouter",
+                    detail=f"Invalid JSON response: {str(e)}"
+                ),
+                original_exception=e
             )
         except httpx.HTTPError as e:
             logger.error(f"API error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=f"API request failed: {str(e)}"
+            raise AIServiceException(
+                ai_service_unavailable(
+                    provider="OpenRouter",
+                    detail=f"API request failed: {str(e)}"
+                ),
+                original_exception=e
             )
         except Exception as e:
             logger.error(f"Extraction error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=str(e)
+            raise AIServiceException(
+                ai_extraction_failed(
+                    provider="OpenRouter",
+                    detail=str(e)
+                ),
+                original_exception=e
             )
     
     async def extract_from_csv(
@@ -230,11 +269,11 @@ Extract the data and return ONLY valid JSON:"""
         try:
             lines = csv_content.strip().split('\n')
             if len(lines) < 2:
-                return ExtractionResponse(
-                    success=False,
-                    line_items=[],
-                    confidence_score=0.0,
-                    error="CSV must have at least a header row and one data row"
+                raise ValidationException(
+                    validation_error(
+                        field="csv_content",
+                        detail="CSV must have at least a header row and one data row"
+                    )
                 )
             
             # Parse CSV
@@ -291,13 +330,16 @@ Extract the data and return ONLY valid JSON:"""
                 processing_time_ms=0
             )
             
+        except ValidationException:
+            raise
         except Exception as e:
             logger.error(f"CSV extraction error: {e}")
-            return ExtractionResponse(
-                success=False,
-                line_items=[],
-                confidence_score=0.0,
-                error=str(e)
+            raise ValidationException(
+                validation_error(
+                    field="csv_content",
+                    detail=f"CSV extraction failed: {str(e)}"
+                ),
+                original_exception=e
             )
     
     async def _save_to_crm(
@@ -310,22 +352,26 @@ Extract the data and return ONLY valid JSON:"""
     ):
         """Save extracted data to CRM database."""
         try:
-            # Create a data capture record
-            capture_record = {
-                "user_id": user_id,
-                "source": source,
-                "document_type": metadata.get("document_type", "unknown"),
-                "document_number": metadata.get("document_number"),
-                "vendor": metadata.get("vendor"),
-                "total_amount": metadata.get("total_amount"),
-                "currency": metadata.get("currency", "USD"),
+            # Create extraction record in database
+            from app.database_sqlite import create_extraction
+            
+            extraction_record = {
+                "id": str(uuid.uuid4()),
+                "organization_id": user_id,  # TODO: Pass actual org_id
+                "source_type": source,
+                "source_content": metadata.get("document_number", ""),
+                "parsed_data": json.dumps({
+                    "line_items": line_items,
+                    "metadata": metadata,
+                    "confidence": confidence
+                }),
                 "confidence_score": confidence,
-                "extracted_at": datetime.utcnow().isoformat(),
-                "line_item_count": len(line_items)
+                "status": "processed",
+                "created_at": datetime.utcnow().isoformat(),
+                "processed_at": datetime.utcnow().isoformat()
             }
             
-            # Save to database (implement in database.py)
-            await db.save_crm_capture(capture_record, line_items)
+            create_extraction(extraction_record)
             logger.info(f"Saved {len(line_items)} line items to CRM for user {user_id}")
             
         except Exception as e:

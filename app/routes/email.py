@@ -1,13 +1,13 @@
 """
 Email API Routes
-Send quotes and notifications via email.
+Send quotes and notifications via email using organization-specific SMTP settings.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 
-from app.services.email_service import email_service
+from app.services.email_service import get_email_service_for_org, EmailMessage
 from app.services.pdf_service import pdf_service
 from app.middleware.organization import get_current_user_and_org
 from app.posthog_utils import capture_event
@@ -50,14 +50,17 @@ async def send_quote_email(
     Send a quote to a customer via email.
     
     Automatically generates and attaches a professional PDF quote.
-    Includes a branded email template with quote summary.
+    Uses organization-specific SMTP settings.
     """
     user_id, org_id = user_org
+    
+    # Get org-specific email service
+    email_service = get_email_service_for_org(org_id)
     
     if not email_service:
         raise HTTPException(
             status_code=503,
-            detail="Email service not configured. Set SMTP credentials in settings."
+            detail="Email service not configured. Please configure SMTP settings in Account > Email."
         )
     
     # Generate PDF if requested
@@ -106,16 +109,18 @@ async def send_custom_email(
     Send a custom email.
     
     For notifications, follow-ups, or any custom communication.
+    Uses organization-specific SMTP settings.
     """
     user_id, org_id = user_org
+    
+    # Get org-specific email service
+    email_service = get_email_service_for_org(org_id)
     
     if not email_service:
         raise HTTPException(
             status_code=503,
-            detail="Email service not configured"
+            detail="Email service not configured. Please configure SMTP settings in Account > Email."
         )
-    
-    from app.services.email_service import EmailMessage
     
     message = EmailMessage(
         to_email=request.to_email,
@@ -144,13 +149,37 @@ async def send_custom_email(
 
 
 @router.get("/status")
-async def email_status():
-    """Check email service status and configuration."""
+async def email_status(user_org: tuple = Depends(get_current_user_and_org)):
+    """
+    Check email service status and configuration for the organization.
+    """
+    user_id, org_id = user_org
+    
+    # Get org-specific email service
+    email_service = get_email_service_for_org(org_id)
+    
     if not email_service:
+        from app.database_sqlite import get_email_settings
+        settings = get_email_settings(org_id)
+        
+        if not settings:
+            return {
+                "enabled": False,
+                "configured": False,
+                "message": "Email not configured. Go to Account > Email to configure SMTP settings."
+            }
+        
+        if not settings.get("is_enabled"):
+            return {
+                "enabled": False,
+                "configured": True,
+                "message": "Email is configured but disabled. Enable it in Account > Email."
+            }
+        
         return {
             "enabled": False,
             "configured": False,
-            "message": "Email service not initialized"
+            "message": "Email configuration error. Check your SMTP settings."
         }
     
     return email_service.get_status()
@@ -163,27 +192,41 @@ async def test_email_config(
 ):
     """
     Test email configuration by sending a test email.
+    Uses organization-specific SMTP settings.
     """
     user_id, org_id = user_org
+    
+    # Get org-specific email service
+    email_service = get_email_service_for_org(org_id)
     
     if not email_service:
         raise HTTPException(
             status_code=503,
-            detail="Email service not configured"
+            detail="Email service not configured. Please configure SMTP settings first."
         )
-    
-    from app.services.email_service import EmailMessage
     
     message = EmailMessage(
         to_email=test_email,
         subject="Mercura Email Test",
-        body_text="This is a test email from your Mercura account.\n\nIf you received this, your email configuration is working correctly!",
+        body_text="""This is a test email from your Mercura account.
+
+If you received this, your email configuration is working correctly!
+
+You can now send quotes to customers via email.
+""",
         body_html="""
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #2563eb;">Email Test Successful! 🎉</h2>
-            <p>This is a test email from your <strong>Mercura</strong> account.</p>
-            <p>If you're seeing this, your email configuration is working correctly!</p>
-            <p style="color: #6b7280; margin-top: 30px;">You can now send quotes to customers via email.</p>
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Mercura</h1>
+            </div>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                <h2 style="color: #111827; margin-top: 0;">Email Test Successful! 🎉</h2>
+                <p style="color: #374151; line-height: 1.6;">This is a test email from your <strong>Mercura</strong> account.</p>
+                <p style="color: #374151; line-height: 1.6;">If you're seeing this, your email configuration is working correctly!</p>
+                <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                    <p style="color: #92400e; margin: 0;">You can now send quotes to customers via email.</p>
+                </div>
+            </div>
         </div>
         """
     )

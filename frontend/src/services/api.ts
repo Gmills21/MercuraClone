@@ -2,26 +2,94 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-// Mock User ID for "Sales-Ready MVP" since we don't have full auth yet
-// In a real app, this would come from AuthContext
-const TEST_USER_ID = '3d4df718-47c3-4903-b09e-711090412204'; // UUID format
-
 // Timeout so hung requests (backend down, CORS, network) don't leave tabs spinning forever
 const REQUEST_TIMEOUT_MS = 20000;
+
+// CSRF token cache
+let csrfToken: string | null = null;
+let csrfTokenFetched = false;
 
 export const api = axios.create({
     baseURL: API_URL,
     timeout: REQUEST_TIMEOUT_MS,
     headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': TEST_USER_ID,
     },
+    withCredentials: true, // Important: allows cookies to be sent/received
 });
+
+// Fetch CSRF token
+const fetchCSRFToken = async (): Promise<string | null> => {
+    try {
+        const response = await axios.get(`${API_URL}/auth/csrf-token`, {
+            withCredentials: true,
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('mercura_token') || ''}`,
+            },
+        });
+        return response.data.csrf_token;
+    } catch (error) {
+        console.warn('Failed to fetch CSRF token:', error);
+        return null;
+    }
+};
+
+// Add auth token and CSRF token to requests
+api.interceptors.request.use(async (config) => {
+    // Add auth token
+    const token = localStorage.getItem('mercura_token');
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // Add CSRF token for state-changing operations
+    const method = config.method?.toUpperCase();
+    if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        // Fetch token if not cached
+        if (!csrfTokenFetched || !csrfToken) {
+            csrfToken = await fetchCSRFToken();
+            csrfTokenFetched = true;
+        }
+
+        if (csrfToken) {
+            config.headers['X-CSRF-Token'] = csrfToken;
+        }
+    }
+
+    return config;
+});
+
+// Handle CSRF errors - refresh token on 403
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+
+        // Check if it's a CSRF error
+        if (error.response?.status === 403 &&
+            error.response?.data?.detail?.includes('CSRF') &&
+            !originalRequest._retry) {
+
+            originalRequest._retry = true;
+
+            // Refresh CSRF token
+            csrfToken = await fetchCSRFToken();
+            if (csrfToken) {
+                originalRequest.headers['X-CSRF-Token'] = csrfToken;
+                return api(originalRequest);
+            }
+        }
+
+        return Promise.reject(error);
+    }
+);
 
 export const quotesApi = {
     list: (limit = 50) => api.get(`/quotes?limit=${limit}`),
     get: (id: string) => api.get(`/quotes/${id}`),
-    create: (data: any) => api.post('/quotes/', data),
+    create: (data: any, idempotencyKey?: string) => api.post('/quotes/', data, {
+        headers: idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}
+    }),
     update: (id: string, data: any) => api.put(`/quotes/${id}`, data),
     patchUpdate: (id: string, data: any) => api.patch(`/quotes/${id}`, data),
     updateStatus: (id: string, status: string) => api.patch(`/quotes/${id}/status?status=${status}`),
@@ -108,10 +176,13 @@ export const extractionsApi = {
         if (data.file) formData.append('file', data.file);
         if (data.source_type) formData.append('source_type', data.source_type);
 
+        // CRITICAL FIX: Extended timeout for AI extraction (90 seconds)
+        // Large files + AI processing can take time, but we need a reasonable limit
         return api.post('/extract/', formData, {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            timeout: 90000, // 90 seconds for AI extraction (vs default 20s)
         });
     },
 };
@@ -142,6 +213,7 @@ export const knowledgeBaseApi = {
 
 // Billing API
 export const billingApi = {
+    getConfig: () => api.get('/billing/config'),
     getPlans: () => api.get('/billing/plans'),
     getSubscription: () => api.get('/billing/subscription'),
     updateSubscription: (data: any) => api.post('/billing/subscription/update', data),
@@ -180,17 +252,17 @@ export const copilotApi = {
     // Process a natural language command
     command: (command: string, quoteId?: string, context?: any) =>
         api.post('/copilot/command', { command, quote_id: quoteId, context }),
-    
+
     // Analyze a quote and get recommendations
     analyze: (quoteId: string) => api.get(`/copilot/analyze/${quoteId}`),
-    
+
     // Get context-aware command suggestions
     getSuggestions: (quoteId: string) => api.get(`/copilot/suggestions/${quoteId}`),
-    
+
     // Apply a copilot-suggested change
     applyChange: (quoteId: string, change: any) =>
         api.post('/copilot/apply-change', { quote_id: quoteId, change }),
-    
+
     // Health check
     health: () => api.get('/copilot/health'),
 };
@@ -200,11 +272,11 @@ export const pdfApi = {
     // Download quote as PDF
     downloadQuote: (quoteId: string) =>
         api.get(`/pdf/quote/${quoteId}`, { responseType: 'blob' }),
-    
+
     // Preview quote PDF (inline)
     previewQuote: (quoteId: string) =>
         api.get(`/pdf/quote/${quoteId}/preview`, { responseType: 'blob' }),
-    
+
     // Check PDF service status
     status: () => api.get('/pdf/status'),
 };
@@ -214,15 +286,15 @@ export const emailApi = {
     // Send quote via email with PDF attachment
     sendQuote: (quoteId: string, data: { to_email: string; to_name?: string; message?: string; include_pdf?: boolean }) =>
         api.post(`/email/quote/${quoteId}/send`, data),
-    
+
     // Send custom email
     sendEmail: (data: { to_email: string; to_name?: string; subject: string; body_text: string; body_html?: string }) =>
         api.post('/email/send', data),
-    
+
     // Test email configuration
     testConfig: (testEmail: string) =>
         api.post('/email/test', { test_email: testEmail }),
-    
+
     // Check email service status
     status: () => api.get('/email/status'),
 };
@@ -237,7 +309,7 @@ export const importApi = {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
     },
-    
+
     // Import products
     importProducts: (file: File, columnMapping?: Record<string, string>) => {
         const formData = new FormData();
@@ -249,7 +321,7 @@ export const importApi = {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
     },
-    
+
     // Import customers
     importCustomers: (file: File, columnMapping?: Record<string, string>) => {
         const formData = new FormData();
@@ -261,11 +333,62 @@ export const importApi = {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
     },
-    
+
     // Download import template
     downloadTemplate: (templateType: string) =>
         api.get(`/import/templates/${templateType}`, { responseType: 'blob' }),
-    
+
     // Check import service status
     status: () => api.get('/import/status'),
 };
+
+// Auth API
+export const authApi = {
+    login: (email: string, password: string) =>
+        api.post('/auth/login', { email, password }),
+
+    register: (email: string, password: string, name: string, companyName: string) =>
+        api.post('/auth/register', { email, password, name, company_name: companyName }),
+
+    logout: () => api.post('/auth/logout'),
+
+    me: () => api.get('/auth/me'),
+};
+
+// Demo Data API
+export const demoDataApi = {
+    load: () => api.post('/data/demo-data'),
+};
+
+// Settings API
+export const settingsApi = {
+    // Email Settings
+    getEmailSettings: () => api.get('/settings/email'),
+    updateEmailSettings: (data: {
+        smtp_host: string;
+        smtp_port: number;
+        smtp_username: string;
+        smtp_password: string;
+        from_email?: string;
+        from_name: string;
+        use_tls: boolean;
+        is_enabled: boolean;
+    }) => api.post('/settings/email', data),
+    deleteEmailSettings: () => api.delete('/settings/email'),
+    testEmailConfig: (test_email: string) => api.post('/settings/email/test', { test_email }),
+    getEmailProviders: () => api.get('/settings/email/providers'),
+};
+
+// Alerts API
+export const alertsApi = {
+    list: (unread_only: boolean = false, limit: number = 50) =>
+        api.get(`/alerts/?unread_only=${unread_only}&limit=${limit}`),
+    getUnreadCount: () => api.get('/alerts/unread-count'),
+    check: () => api.post('/alerts/check'),
+    markRead: (alertId: string) => api.post(`/alerts/${alertId}/read`),
+    markAllRead: () => api.post('/alerts/mark-all-read'),
+    dismiss: (alertId: string) => api.delete(`/alerts/${alertId}`),
+    getTypes: () => api.get('/alerts/types'),
+};
+
+// Export consolidated in earlier emailApi definition above

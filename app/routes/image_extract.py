@@ -2,11 +2,13 @@
 Image Upload Routes for Camera/OCR functionality
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from typing import Optional
 import base64
 
 from app.image_extraction_service import image_extraction_service
+from app.security_utils import sanitize_filename
+from app.middleware.organization import get_current_user_and_org
 
 router = APIRouter(prefix="/image-extract", tags=["image-extraction"])
 
@@ -32,6 +34,11 @@ async def upload_image_for_extraction(
             detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
         )
     
+    # Sanitize filename
+    safe_filename = sanitize_filename(file.filename)
+    if not safe_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
     try:
         # Read image data
         image_data = await file.read()
@@ -43,13 +50,13 @@ async def upload_image_for_extraction(
         # Extract data from image
         result = await image_extraction_service.extract_from_image(
             image_data, 
-            filename=file.filename
+            filename=safe_filename
         )
         
         return {
             "success": result["success"],
             "source": source,
-            "filename": file.filename,
+            "filename": safe_filename,
             "extracted_text": result.get("ocr_text", ""),
             "structured_data": result.get("extracted_data"),
             "confidence": result.get("confidence", 0),
@@ -75,6 +82,9 @@ async def upload_base64_image(
     - **filename**: Optional filename
     - **source**: 'camera', 'gallery', etc.
     """
+    # Sanitize filename
+    safe_filename = sanitize_filename(filename) or "camera-capture.jpg"
+    
     try:
         # Decode base64
         # Handle data URI format (data:image/jpeg;base64,/9j/4AAQ...)
@@ -88,7 +98,7 @@ async def upload_base64_image(
             raise HTTPException(status_code=400, detail="Image too large (max 10MB)")
         
         # Extract
-        result = await image_extraction_service.extract_from_image(image_data, filename)
+        result = await image_extraction_service.extract_from_image(image_data, safe_filename)
         
         return {
             "success": result["success"],
@@ -109,7 +119,8 @@ async def upload_base64_image(
 async def create_quote_from_image(
     file: UploadFile = File(...),
     customer_id: Optional[str] = Form(None),
-    notes: Optional[str] = Form("")
+    notes: Optional[str] = Form(""),
+    user_org: tuple = Depends(get_current_user_and_org)
 ):
     """
     One-step process: Upload image and create a quote.

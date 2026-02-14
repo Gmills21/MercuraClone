@@ -12,8 +12,36 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import httpx
 from app.config import settings
+from app.utils.resilience import (
+    CircuitBreaker,
+    with_retry,
+    RetryConfig,
+    with_timeout,
+    TimeoutError,
+    CircuitBreakerOpen
+)
+from app.errors import (
+    AppError,
+    ErrorCategory,
+    ErrorSeverity,
+    MercuraException,
+    classify_exception
+)
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for Paddle API calls
+PADDLE_RETRY_CONFIG = RetryConfig(
+    max_attempts=3,
+    base_delay=2.0,
+    max_delay=30.0,
+    retryable_exceptions=[
+        httpx.TimeoutException,
+        httpx.ConnectError,
+        httpx.NetworkError,
+        httpx.HTTPStatusError
+    ]
+)
 
 
 class PaddleService:
@@ -37,6 +65,11 @@ class PaddleService:
         self.enabled = bool(self.vendor_id and self.vendor_auth_code)
         if not self.enabled:
             logger.warning("Paddle credentials not configured. Billing features will be disabled.")
+        
+        # Initialize circuit breaker for resilience
+        self.circuit_breaker = CircuitBreaker("paddle")
+        self.timeout_seconds = 30.0
+
     
     async def create_checkout_session(
         self,
@@ -64,10 +97,25 @@ class PaddleService:
             Dict with checkout_url and session_id
         """
         if not self.enabled:
-            raise ValueError("Paddle is not configured")
+            raise MercuraException(
+                AppError(
+                    category=ErrorCategory.BILLING_ERROR,
+                    code="BILLING_NOT_CONFIGURED",
+                    message="Billing service is not configured. Please contact support to enable billing.",
+                    severity=ErrorSeverity.ERROR,
+                    http_status=400,
+                    retryable=False,
+                    suggested_action="Contact your administrator to configure Paddle billing integration."
+                )
+            )
         
-        try:
-            async with httpx.AsyncClient() as client:
+        # Check circuit breaker
+        if self.circuit_breaker.is_open:
+            raise CircuitBreakerOpen("paddle", 300)
+        
+        @self.circuit_breaker.protect
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 payload = {
                     "vendor_id": self.vendor_id,
                     "vendor_auth_code": self.vendor_auth_code,
@@ -96,10 +144,29 @@ class PaddleService:
                     "checkout_url": data["response"]["url"],
                     "session_id": data["response"].get("id", "")
                 }
-                
+        
+        try:
+            return await with_retry(_make_request, config=PADDLE_RETRY_CONFIG)
+        except CircuitBreakerOpen as e:
+            logger.error(f"Paddle circuit breaker open: {e}")
+            raise MercuraException(
+                AppError(
+                    category=ErrorCategory.BILLING_ERROR,
+                    code="BILLING_SERVICE_UNAVAILABLE",
+                    message="Billing service is temporarily unavailable. Please try again in a few minutes.",
+                    severity=ErrorSeverity.WARNING,
+                    http_status=503,
+                    retryable=True,
+                    retry_after_seconds=300,
+                    suggested_action="Wait a few minutes and try again. If the issue persists, contact support."
+                ),
+                original_exception=e
+            )
         except Exception as e:
             logger.error(f"Error creating Paddle checkout session: {e}")
-            raise
+            app_error = classify_exception(e)
+            app_error.category = ErrorCategory.BILLING_ERROR
+            raise MercuraException(app_error, original_exception=e)
     
     async def get_subscription(self, subscription_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -114,8 +181,13 @@ class PaddleService:
         if not self.enabled:
             return None
         
-        try:
-            async with httpx.AsyncClient() as client:
+        if self.circuit_breaker.is_open:
+            logger.warning("Paddle circuit breaker open, skipping get_subscription")
+            return None
+        
+        @self.circuit_breaker.protect
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(
                     f"{self.api_url}/2.0/subscription/users",
                     data={
@@ -130,7 +202,9 @@ class PaddleService:
                 if data.get("success") and data.get("response"):
                     return data["response"][0] if data["response"] else None
                 return None
-                
+        
+        try:
+            return await with_retry(_make_request, config=PADDLE_RETRY_CONFIG)
         except Exception as e:
             logger.error(f"Error fetching Paddle subscription: {e}")
             return None
@@ -157,8 +231,13 @@ class PaddleService:
         if not self.enabled:
             return False
         
-        try:
-            async with httpx.AsyncClient() as client:
+        if self.circuit_breaker.is_open:
+            logger.warning("Paddle circuit breaker open, skipping update_subscription")
+            return False
+        
+        @self.circuit_breaker.protect
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 payload = {
                     "vendor_id": self.vendor_id,
                     "vendor_auth_code": self.vendor_auth_code,
@@ -180,7 +259,9 @@ class PaddleService:
                 
                 data = response.json()
                 return data.get("success", False)
-                
+        
+        try:
+            return await with_retry(_make_request, config=PADDLE_RETRY_CONFIG)
         except Exception as e:
             logger.error(f"Error updating Paddle subscription: {e}")
             return False
@@ -198,8 +279,13 @@ class PaddleService:
         if not self.enabled:
             return False
         
-        try:
-            async with httpx.AsyncClient() as client:
+        if self.circuit_breaker.is_open:
+            logger.warning("Paddle circuit breaker open, skipping cancel_subscription")
+            return False
+        
+        @self.circuit_breaker.protect
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(
                     f"{self.api_url}/2.0/subscription/users_cancel",
                     data={
@@ -212,7 +298,9 @@ class PaddleService:
                 
                 data = response.json()
                 return data.get("success", False)
-                
+        
+        try:
+            return await with_retry(_make_request, config=PADDLE_RETRY_CONFIG)
         except Exception as e:
             logger.error(f"Error canceling Paddle subscription: {e}")
             return False
@@ -230,8 +318,13 @@ class PaddleService:
         if not self.enabled:
             return []
         
-        try:
-            async with httpx.AsyncClient() as client:
+        if self.circuit_breaker.is_open:
+            logger.warning("Paddle circuit breaker open, skipping get_invoices")
+            return []
+        
+        @self.circuit_breaker.protect
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(
                     f"{self.api_url}/2.0/subscription/payments",
                     data={
@@ -246,7 +339,9 @@ class PaddleService:
                 if data.get("success"):
                     return data.get("response", [])
                 return []
-                
+        
+        try:
+            return await with_retry(_make_request, config=PADDLE_RETRY_CONFIG)
         except Exception as e:
             logger.error(f"Error fetching Paddle invoices: {e}")
             return []

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
     CreditCard, Users, Calendar, Download, AlertCircle,
     CheckCircle, XCircle, Settings, Plus, Trash2, ExternalLink,
-    TrendingUp, DollarSign, Package, Shield
+    TrendingUp, DollarSign, Package, Shield, Mail
 } from 'lucide-react';
 import { billingApi } from '../services/api';
 
@@ -57,13 +57,51 @@ export const AccountBilling = () => {
     const [usage, setUsage] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'overview' | 'plans' | 'invoices' | 'seats'>('overview');
+    
+    // Billing configuration status
+    const [billingEnabled, setBillingEnabled] = useState<boolean>(true);
+    const [billingMessage, setBillingMessage] = useState<string>('');
+    const [billingConfig, setBillingConfig] = useState<any>(null);
+    
+    // Seat assignment modal state
+    const [showAssignModal, setShowAssignModal] = useState(false);
+    const [assignEmail, setAssignEmail] = useState('');
+    const [assignName, setAssignName] = useState('');
+    const [assignLoading, setAssignLoading] = useState(false);
 
     useEffect(() => {
         loadBillingData();
+        
+        // Check for Paddle checkout return
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('success') === 'true') {
+            // Clear the URL parameter
+            window.history.replaceState({}, '', window.location.pathname);
+            // Show success message (could use a toast here)
+            setTimeout(() => {
+                alert('Payment successful! Your subscription has been updated.');
+            }, 500);
+        } else if (urlParams.get('canceled') === 'true') {
+            window.history.replaceState({}, '', window.location.pathname);
+        }
     }, []);
 
     const loadBillingData = async () => {
         try {
+            // First check if billing is configured
+            const configRes = await billingApi.getConfig();
+            setBillingConfig(configRes.data);
+            setBillingEnabled(configRes.data.enabled);
+            setBillingMessage(configRes.data.message);
+            
+            if (!configRes.data.enabled) {
+                // Billing not configured - still load plans for display but show notice
+                const plansRes = await billingApi.getPlans();
+                setPlans(plansRes.data);
+                setLoading(false);
+                return;
+            }
+
             const [subRes, plansRes, invoicesRes, seatsRes, usageRes] = await Promise.all([
                 billingApi.getSubscription(),
                 billingApi.getPlans(),
@@ -74,17 +112,27 @@ export const AccountBilling = () => {
 
             setSubscription(subRes.data);
             setPlans(plansRes.data);
-            setInvoices(invoicesRes.data);
-            setSeats(seatsRes.data);
+            setInvoices(invoicesRes.data.invoices || []);
+            setSeats(seatsRes.data.seats || []);
             setUsage(usageRes.data);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load billing data:', error);
+            // Check if it's a billing not configured error
+            if (error.response?.data?.detail?.code === 'BILLING_NOT_CONFIGURED') {
+                setBillingEnabled(false);
+                setBillingMessage(error.response.data.detail.message);
+            }
         } finally {
             setLoading(false);
         }
     };
 
     const handleUpgradePlan = async (planId: string) => {
+        if (!billingEnabled) {
+            alert('Subscription billing is not yet enabled. Please contact support@mercura.ai to upgrade your account.');
+            return;
+        }
+        
         try {
             const response = await billingApi.createCheckoutSession({
                 plan_id: planId,
@@ -96,8 +144,14 @@ export const AccountBilling = () => {
 
             // Redirect to Paddle checkout
             window.location.href = response.data.checkout_url;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to create checkout session:', error);
+            const errorDetail = error.response?.data?.detail;
+            if (errorDetail?.code === 'BILLING_NOT_CONFIGURED') {
+                alert(errorDetail.message || 'Billing is not configured. Please contact support.');
+            } else {
+                alert('Unable to create checkout session. Please try again or contact support.');
+            }
         }
     };
 
@@ -118,6 +172,36 @@ export const AccountBilling = () => {
             await loadBillingData();
         } catch (error) {
             console.error('Failed to cancel subscription:', error);
+        }
+    };
+
+    const handleAssignSeat = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!assignEmail.trim()) return;
+        
+        setAssignLoading(true);
+        try {
+            await billingApi.assignSeat(assignEmail.trim(), assignName.trim() || undefined);
+            setAssignEmail('');
+            setAssignName('');
+            setShowAssignModal(false);
+            await loadBillingData();
+        } catch (error) {
+            console.error('Failed to assign seat:', error);
+            alert('Failed to assign seat. Please check if you have available seats.');
+        } finally {
+            setAssignLoading(false);
+        }
+    };
+
+    const handleDeactivateSeat = async (seatId: string) => {
+        if (!confirm('Remove this team member? They will lose access immediately.')) return;
+        
+        try {
+            await billingApi.deactivateSeat(seatId);
+            await loadBillingData();
+        } catch (error) {
+            console.error('Failed to deactivate seat:', error);
         }
     };
 
@@ -146,6 +230,23 @@ export const AccountBilling = () => {
 
     return (
         <div className="min-h-screen bg-gray-50/50">
+            {/* Billing Not Configured Notice */}
+            {!billingEnabled && (
+                <div className="bg-amber-50 border-b border-amber-200">
+                    <div className="max-w-7xl mx-auto px-8 py-4">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+                            <div>
+                                <h3 className="font-semibold text-amber-900">Subscription Billing Not Yet Available</h3>
+                                <p className="text-amber-800 mt-1">
+                                    {billingMessage || 'Subscription billing is not yet enabled for your account.'}
+                                    {' '}Please contact <a href="mailto:support@mercura.ai" className="underline font-medium">support@mercura.ai</a> to upgrade your account.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Header */}
             <div className="bg-white border-b border-gray-200">
                 <div className="max-w-7xl mx-auto px-8 py-6">
@@ -200,9 +301,15 @@ export const AccountBilling = () => {
                                 </div>
                                 <button
                                     onClick={() => setActiveTab('plans')}
-                                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                                    disabled={!billingEnabled}
+                                    className={`px-4 py-2 rounded-lg transition-colors ${
+                                        billingEnabled
+                                            ? 'bg-orange-600 text-white hover:bg-orange-700'
+                                            : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                    title={billingEnabled ? '' : 'Contact support to upgrade your account'}
                                 >
-                                    Upgrade Plan
+                                    {billingEnabled ? 'Upgrade Plan' : 'Contact Support to Upgrade'}
                                 </button>
                             </div>
 
@@ -332,13 +439,20 @@ export const AccountBilling = () => {
 
                                 <button
                                     onClick={() => handleUpgradePlan(plan.paddle_plan_id || plan.id)}
-                                    disabled={subscription?.plan_id === plan.id}
-                                    className={`w-full mt-6 px-4 py-3 rounded-lg font-medium transition-colors ${subscription?.plan_id === plan.id
-                                        ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
-                                        : 'bg-orange-600 text-white hover:bg-orange-700'
-                                        }`}
+                                    disabled={subscription?.plan_id === plan.id || !billingEnabled}
+                                    className={`w-full mt-6 px-4 py-3 rounded-lg font-medium transition-colors ${
+                                        subscription?.plan_id === plan.id
+                                            ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                                            : !billingEnabled
+                                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                : 'bg-orange-600 text-white hover:bg-orange-700'
+                                    }`}
                                 >
-                                    {subscription?.plan_id === plan.id ? 'Current Plan' : 'Select Plan'}
+                                    {subscription?.plan_id === plan.id 
+                                        ? 'Current Plan' 
+                                        : !billingEnabled 
+                                            ? 'Contact Support to Upgrade'
+                                            : 'Select Plan'}
                                 </button>
                             </div>
                         ))}
@@ -406,7 +520,11 @@ export const AccountBilling = () => {
                                         {seats.filter(s => s.is_active).length} of {subscription?.seats || 0} seats assigned
                                     </p>
                                 </div>
-                                <button className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2">
+                                <button 
+                                    onClick={() => setShowAssignModal(true)}
+                                    disabled={seats.filter(s => s.is_active).length >= (subscription?.seats || 0)}
+                                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
                                     <Plus size={18} />
                                     Assign Seat
                                 </button>
@@ -433,13 +551,67 @@ export const AccountBilling = () => {
                                                     <p className="text-sm text-gray-600">{seat.sales_rep_email}</p>
                                                 </div>
                                             </div>
-                                            <button className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                            <button 
+                                                onClick={() => handleDeactivateSeat(seat.id)}
+                                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            >
                                                 <Trash2 size={18} />
                                             </button>
                                         </div>
                                     ))}
                                 </div>
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Assign Seat Modal */}
+                {showAssignModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+                            <h3 className="text-xl font-semibold text-gray-900 mb-4">Assign Seat</h3>
+                            <p className="text-gray-600 mb-6">
+                                Invite a team member to use Mercura. They'll receive an email invitation.
+                            </p>
+                            <form onSubmit={handleAssignSeat} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                                    <input
+                                        type="email"
+                                        value={assignEmail}
+                                        onChange={(e) => setAssignEmail(e.target.value)}
+                                        placeholder="colleague@company.com"
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Name (optional)</label>
+                                    <input
+                                        type="text"
+                                        value={assignName}
+                                        onChange={(e) => setAssignName(e.target.value)}
+                                        placeholder="John Doe"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAssignModal(false)}
+                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={assignLoading || !assignEmail.trim()}
+                                        className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+                                    >
+                                        {assignLoading ? 'Assigning...' : 'Assign Seat'}
+                                    </button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 )}

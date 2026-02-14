@@ -3,8 +3,8 @@ Customers API routes using local SQLite.
 """
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional, Dict
 from datetime import datetime
 import uuid
 
@@ -18,11 +18,28 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 
 
 class CustomerCreate(BaseModel):
-    name: str
-    email: Optional[str] = None
-    company: Optional[str] = None
-    phone: Optional[str] = None
-    address: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=255, description="Customer name is required")
+    email: Optional[str] = Field(None, max_length=255)
+    company: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = Field(None, max_length=500)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('Customer name cannot be empty')
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            v = v.strip().lower()
+            if len(v) > 255:
+                raise ValueError('Email too long')
+        return v
 
 
 class CustomerUpdate(BaseModel):
@@ -45,6 +62,38 @@ class CustomerResponse(BaseModel):
     organization_id: Optional[str] = None
 
 
+# In-memory dedup cache for customer creation (use Redis in production)
+_customer_creation_cache: Dict[str, datetime] = {}
+_CUSTOMER_DEDUP_TTL_SECONDS = 30  # 30 seconds
+
+
+def _is_duplicate_customer_creation(org_id: str, name: str, email: Optional[str]) -> bool:
+    """Check if this appears to be a duplicate customer creation request."""
+    from app.utils.observability import logger
+    
+    # Create a key based on org + normalized name + email
+    key_parts = [org_id, name.lower().strip()]
+    if email:
+        key_parts.append(email.lower().strip())
+    key = "|".join(key_parts)
+    
+    now = datetime.utcnow()
+    
+    # Clean expired entries
+    expired = [k for k, v in _customer_creation_cache.items() if (now - v).seconds > _CUSTOMER_DEDUP_TTL_SECONDS]
+    for k in expired:
+        del _customer_creation_cache[k]
+    
+    # Check if this exact request was made recently
+    if key in _customer_creation_cache:
+        logger.info(f"Potential duplicate customer creation detected: {name[:30]}...")
+        return True
+    
+    # Cache this request
+    _customer_creation_cache[key] = now
+    return False
+
+
 @router.post("/", response_model=CustomerResponse)
 async def create_customer_endpoint(
     customer: CustomerCreate,
@@ -52,6 +101,34 @@ async def create_customer_endpoint(
 ):
     """Create a new customer."""
     user_id, org_id = user_org
+    
+    # Check for rapid duplicate submissions (race condition protection)
+    if _is_duplicate_customer_creation(org_id, customer.name, customer.email):
+        # Wait a moment and check if customer was just created
+        import time
+        time.sleep(0.5)
+        
+        # Try to find existing customer with same name/email in this org
+        from app.database_sqlite import get_db
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if customer.email:
+                cursor.execute(
+                    "SELECT id FROM customers WHERE organization_id = ? AND (name = ? OR email = ?) ORDER BY created_at DESC LIMIT 1",
+                    (org_id, customer.name, customer.email)
+                )
+            else:
+                cursor.execute(
+                    "SELECT id FROM customers WHERE organization_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1",
+                    (org_id, customer.name)
+                )
+            row = cursor.fetchone()
+            if row:
+                # Return existing customer
+                existing = get_customer_by_id(row['id'], organization_id=org_id)
+                if existing:
+                    return CustomerResponse(**existing)
+    
     now = datetime.utcnow().isoformat()
     customer_id = str(uuid.uuid4())
     

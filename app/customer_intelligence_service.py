@@ -28,14 +28,14 @@ class CustomerIntelligenceService:
     """Generate simple, actionable customer insights."""
     
     @staticmethod
-    def analyze_customer(customer_id: str) -> Dict[str, Any]:
+    def analyze_customer(customer_id: str, organization_id: str) -> Dict[str, Any]:
         """Generate complete intelligence profile for a customer."""
         try:
-            customer = get_customer_by_id(customer_id)
+            customer = get_customer_by_id(customer_id, organization_id)
             if not customer:
                 return {"error": "Customer not found"}
             
-            quotes = list_quotes(limit=100)
+            quotes = list_quotes(organization_id=organization_id, limit=100)
             customer_quotes = [q for q in quotes if q.get('customer_id') == customer_id]
             
             return {
@@ -390,11 +390,11 @@ class CustomerIntelligenceService:
         return predictions
     
     @staticmethod
-    def get_customer_list_intelligence() -> Dict[str, Any]:
+    def get_customer_list_intelligence(organization_id: str) -> Dict[str, Any]:
         """Get intelligence summary for all customers."""
         try:
-            customers = list_customers(limit=100)
-            quotes = list_quotes(limit=200)
+            customers = list_customers(organization_id=organization_id, limit=100)
+            quotes = list_quotes(organization_id=organization_id, limit=200)
             
             # Categorize customers
             categories = {

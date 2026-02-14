@@ -1,9 +1,10 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, Outlet, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { PageSkeleton } from './components/SkeletonScreens';
 import { FlawlessShell, FlawlessPage } from './components/FlawlessShell';
 import { queryClient, prefetchDashboardData } from './lib/queryClient';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // ============================================
 // LAZY LOADED PAGES WITH PRELOAD SUPPORT
@@ -17,6 +18,15 @@ const Products = lazy(() => import('./pages/Products'));
 const Emails = lazy(() => import('./pages/Emails'));
 const Projects = lazy(() => import('./pages/Projects'));
 
+// Auth pages
+const SignupPage = lazy(() => import('./pages/Signup'));
+const LoginPage = lazy(() => import('./pages/Login'));
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPassword'));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPassword'));
+const AcceptInvitePage = lazy(() => import('./pages/AcceptInvite'));
+const OnboardingPage = lazy(() => import('./pages/Onboarding'));
+const TeamManagementPage = lazy(() => import('./pages/TeamManagement'));
+
 // Secondary pages - loaded on demand
 const SmartQuote = lazy(() => import('./pages/SmartQuote'));
 const QuoteReview = lazy(() => import('./pages/QuoteReview'));
@@ -24,12 +34,15 @@ const QuoteView = lazy(() => import('./pages/QuoteView'));
 const CompetitorMapping = lazy(() => import('./pages/CompetitorMapping'));
 const QuickBooksIntegration = lazy(() => import('./pages/QuickBooksIntegration'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
+const AlertsPageNew = lazy(() => import('./pages/AlertsPage')); // New alerts page
 const CustomerIntelligence = lazy(() => import('./pages/CustomerIntelligence'));
 const IntelligenceDashboard = lazy(() => import('./pages/IntelligenceDashboard'));
 const CameraCapture = lazy(() => import('./pages/CameraCapture'));
 const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'));
 const AccountBilling = lazy(() => import('./pages/AccountBilling'));
 const Security = lazy(() => import('./pages/Security'));
+const EmailSettings = lazy(() => import('./pages/EmailSettings'));
+const CustomDomainSettings = lazy(() => import('./pages/CustomDomainSettings'));
 const CreateQuote = lazy(() => import('./pages/CreateQuote'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 
@@ -81,19 +94,44 @@ const SuspenseWrapper = ({
 
 const FlawlessLayout: React.FC = () => {
   return (
-    <Layout>
-      <FlawlessShell
-        cachedRoutes={CACHED_ROUTES}
-        maxCacheSize={6}
-        enableAnimation={true}
-        className="flex-1"
-      >
-        <div className="p-6">
-          <Outlet />
-        </div>
-      </FlawlessShell>
-    </Layout>
+    <ProtectedRoute>
+      <Layout>
+        <FlawlessShell
+          cachedRoutes={CACHED_ROUTES}
+          maxCacheSize={6}
+          enableAnimation={true}
+          className="flex-1"
+        >
+          <div className="p-6">
+            <Outlet />
+          </div>
+        </FlawlessShell>
+      </Layout>
+    </ProtectedRoute>
   );
+};
+
+// ============================================
+// AUTH PROTECTED ROUTE WRAPPER
+// ============================================
+
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <PageSkeleton type="dashboard" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
 };
 
 // ============================================
@@ -199,30 +237,83 @@ function App() {
   }
 
   return (
-    <Router>
-      {/* Preload core pages during idle time */}
-      <Preloader />
+    <AuthProvider>
+      <Router>
+        {/* Preload core pages during idle time */}
+        <Preloader />
 
-      <Routes>
-        {/* Public routes - no layout */}
-        <Route
-          path="/quote/:token"
-          element={
-            <SuspenseWrapper type="cards">
-              <QuoteView />
-            </SuspenseWrapper>
-          }
-        />
+        <Routes>
+          {/* Auth routes - no layout */}
+          <Route
+            path="/signup"
+            element={
+              <SuspenseWrapper type="cards">
+                <SignupPage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <SuspenseWrapper type="cards">
+                <LoginPage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <SuspenseWrapper type="cards">
+                <ForgotPasswordPage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <SuspenseWrapper type="cards">
+                <ResetPasswordPage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/accept-invite"
+            element={
+              <SuspenseWrapper type="cards">
+                <AcceptInvitePage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <SuspenseWrapper type="cards">
+                  <OnboardingPage />
+                </SuspenseWrapper>
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Public landing page */}
-        <Route
-          path="/"
-          element={
-            <SuspenseWrapper type="cards">
-              <LandingPage />
-            </SuspenseWrapper>
-          }
-        />
+          {/* Public routes - no layout */}
+          <Route
+            path="/quote/:token"
+            element={
+              <SuspenseWrapper type="cards">
+                <QuoteView />
+              </SuspenseWrapper>
+            }
+          />
+
+          {/* Public landing page */}
+          <Route
+            path="/"
+            element={
+              <SuspenseWrapper type="cards">
+                <LandingPage />
+              </SuspenseWrapper>
+            }
+          />
 
         {/* Protected routes with FlawlessShell for instant navigation */}
         <Route element={<FlawlessLayout />}>
@@ -249,7 +340,7 @@ function App() {
             <SuspenseWrapper type="cards"><QuickBooksIntegration /></SuspenseWrapper>
           } />
           <Route path="/alerts" element={
-            <SuspenseWrapper type="cards"><AlertsPage /></SuspenseWrapper>
+            <SuspenseWrapper type="table"><AlertsPageNew /></SuspenseWrapper>
           } />
           <Route path="/intelligence" element={
             <SuspenseWrapper type="dashboard"><IntelligenceDashboard /></SuspenseWrapper>
@@ -272,9 +363,19 @@ function App() {
           <Route path="/security" element={
             <SuspenseWrapper type="cards"><Security /></SuspenseWrapper>
           } />
+          <Route path="/account/email" element={
+            <SuspenseWrapper type="cards"><EmailSettings /></SuspenseWrapper>
+          } />
+          <Route path="/account/domain" element={
+            <SuspenseWrapper type="cards"><CustomDomainSettings /></SuspenseWrapper>
+          } />
+          <Route path="/team" element={
+            <SuspenseWrapper type="cards"><TeamManagementPage /></SuspenseWrapper>
+          } />
         </Route>
       </Routes>
     </Router>
+    </AuthProvider>
   );
 }
 

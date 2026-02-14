@@ -18,7 +18,7 @@ class EmailStatus(str, Enum):
 
 
 class InboundEmail(BaseModel):
-    """Model for inbound email tracking."""
+    """Model for inbound email tracking. Note: raw_email_size and user_id are not in DB schema (inbound_emails table)."""
     id: Optional[str] = None
     sender_email: EmailStr
     subject_line: Optional[str] = None
@@ -27,8 +27,8 @@ class InboundEmail(BaseModel):
     error_message: Optional[str] = None
     has_attachments: bool = False
     attachment_count: int = 0
-    raw_email_size: Optional[int] = None
-    user_id: Optional[str] = None
+    raw_email_size: Optional[int] = None  # Not persisted in DB
+    user_id: Optional[str] = None  # Not persisted in DB
     
     class Config:
         use_enum_values = True

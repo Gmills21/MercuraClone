@@ -12,6 +12,7 @@ from app.config import settings
 
 from app.erp_export import get_erp_exporter
 from app.services.n8n_service import n8n_service
+from app.errors import MercuraException
 
 router = APIRouter(prefix="/export", tags=["erp-export"])
 
@@ -112,18 +113,23 @@ async def send_quote_to_erp_webhook(
         raise HTTPException(status_code=404, detail=result["error"])
     
     # Send to n8n
-    success = await n8n_service.trigger_webhook(
-        event_type="erp_export",
-        payload={
-            "quote_id": quote_id,
-            "format": format,
-            "data": result,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
-    
-    if not success:
-        raise HTTPException(status_code=502, detail="Failed to send to n8n webhook")
+    try:
+        await n8n_service.trigger_webhook(
+            event_type="erp_export",
+            payload={
+                "quote_id": quote_id,
+                "format": format,
+                "data": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    except MercuraException as e:
+        # Convert MercuraException to HTTPException
+        app_error = e.to_app_error()
+        raise HTTPException(
+            status_code=app_error.http_status or 502,
+            detail=app_error.message
+        )
             
     capture_event(
         distinct_id="anonymous",

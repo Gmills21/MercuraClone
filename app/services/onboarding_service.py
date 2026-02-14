@@ -35,13 +35,36 @@ class UnifiedOnboardingService:
     
     def __init__(self):
         self._progress: Dict[str, Dict[str, Any]] = {}
+        self._dismissed: Dict[str, bool] = {}
     
-    def get_checklist(self, user_id: str) -> Dict[str, Any]:
+    def mark_step_complete(self, user_id: str, step_id: str) -> bool:
+        """Mark a step as manually completed."""
+        if user_id not in self._progress:
+            self._progress[user_id] = {}
+        self._progress[user_id][step_id] = {
+            "completed": True,
+            "completed_at": datetime.now().isoformat()
+        }
+        return True
+    
+    def dismiss_checklist(self, user_id: str) -> bool:
+        """Dismiss the checklist for a user."""
+        self._dismissed[user_id] = True
+        return True
+    
+    def should_show_checklist(self, user_id: str) -> bool:
+        """Check if checklist should be shown."""
+        if self._dismissed.get(user_id):
+            return False
+        checklist = self.get_checklist(user_id)
+        return not checklist["is_complete"]
+    
+    def get_checklist(self, user_id: str, organization_id: str = None) -> Dict[str, Any]:
         """Get checklist with real-time state from other services."""
         
-        # Query real data
-        quotes = list_quotes(limit=10)
-        customers = list_customers(limit=10)
+        # Query real data (organization-scoped)
+        quotes = list_quotes(organization_id=organization_id, limit=10) if organization_id else []
+        customers = list_customers(organization_id=organization_id, limit=10) if organization_id else []
         qb_connected = self._is_erp_connected(user_id, "quickbooks")
         
         # Build steps based on actual data
@@ -158,5 +181,87 @@ class UnifiedOnboardingService:
         return False
 
 
+
 # Global instance
 onboarding_service = UnifiedOnboardingService()
+
+
+class SimplifiedModeService:
+    """
+    Simplified UI mode for new users.
+    Hides advanced features until user is ready.
+    """
+    
+    _user_modes: Dict[str, Dict[str, Any]] = {}
+    
+    @classmethod
+    def get_mode(cls, user_id: str) -> Dict[str, Any]:
+        """Get user's current UI mode."""
+        mode = cls._user_modes.get(user_id, {
+            "mode": "simplified",  # 'simplified' or 'advanced'
+            "switched_at": None,
+            "quote_count": 0
+        })
+        
+        # Auto-switch to advanced after 10 quotes
+        if mode["quote_count"] >= 10 and mode["mode"] == "simplified":
+            mode["mode"] = "advanced"
+            mode["switched_at"] = datetime.now().isoformat()
+        
+        return mode
+    
+    @classmethod
+    def set_mode(cls, user_id: str, mode: str) -> bool:
+        """Manually set UI mode."""
+        if mode not in ["simplified", "advanced"]:
+            return False
+        
+        if user_id not in cls._user_modes:
+            cls._user_modes[user_id] = {}
+        
+        cls._user_modes[user_id]["mode"] = mode
+        cls._user_modes[user_id]["switched_at"] = datetime.now().isoformat()
+        
+        return True
+    
+    @classmethod
+    def record_quote_created(cls, user_id: str):
+        """Track quote creation for auto-switch."""
+        if user_id not in cls._user_modes:
+            cls._user_modes[user_id] = {"mode": "simplified", "quote_count": 0}
+        
+        cls._user_modes[user_id]["quote_count"] = cls._user_modes[user_id].get("quote_count", 0) + 1
+    
+    @classmethod
+    def get_visible_features(cls, user_id: str) -> Dict[str, bool]:
+        """Get which features should be visible."""
+        mode = cls.get_mode(user_id)
+        
+        if mode["mode"] == "simplified":
+            return {
+                "smart_quote": True,
+                "basic_quotes": True,
+                "customers": True,
+                "today_view": True,
+                "alerts": True,
+                "intelligence": False,  # Hide initially
+                "competitors": False,
+                "quickbooks": False,
+                "camera": True,
+                "impact": True,
+                "advanced_analytics": False
+            }
+        else:
+            return {
+                "smart_quote": True,
+                "basic_quotes": True,
+                "customers": True,
+                "today_view": True,
+                "alerts": True,
+                "intelligence": True,
+                "competitors": True,
+                "quickbooks": True,
+                "camera": True,
+                "impact": True,
+                "advanced_analytics": True
+            }

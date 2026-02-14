@@ -2,6 +2,12 @@
 Multi-Provider AI Service for OpenMercura
 Manages multiple Gemini and OpenRouter API keys with intelligent rotation and fallback.
 Uses API keys from OpenClaw configuration.
+
+Includes production-grade error handling:
+- Retry logic with exponential backoff
+- Circuit breaker pattern for failing providers
+- User-friendly error messages
+- Graceful degradation
 """
 
 import os
@@ -14,6 +20,15 @@ from datetime import datetime, timedelta
 from enum import Enum
 import httpx
 from loguru import logger
+
+from app.errors import (
+    ai_service_unavailable, ai_rate_limited, ai_extraction_failed,
+    AppError, ErrorCategory, ErrorSeverity
+)
+from app.utils.resilience import (
+    with_retry, RetryConfig, CircuitBreaker, CircuitBreakerOpen,
+    with_timeout, TimeoutError, get_degradation_manager
+)
 
 
 class ProviderType(Enum):
@@ -40,8 +55,8 @@ class ProviderConfig:
     base_url: str
     default_model: str
     available_models: List[str]
-    timeout_seconds: float = 60.0
-    max_retries: int = 3
+    timeout_seconds: float = 30.0  # Reduced from 60s for faster failover
+    max_retries: int = 2
 
 
 # Provider configurations
@@ -69,14 +84,16 @@ OPENROUTER_CONFIG = ProviderConfig(
 
 class MultiProviderAIService:
     """
-    Multi-provider AI service that manages multiple Gemini and OpenRouter API keys.
+    Multi-provider AI service with production-grade resilience.
     
     Features:
     - Automatic API key rotation for load balancing
     - Intelligent fallback between providers
     - Rate limit tracking and backoff
     - Usage statistics per key
-    - Support for both Gemini (Google Generative AI) and OpenRouter APIs
+    - Circuit breaker pattern for failing services
+    - Exponential backoff retry logic
+    - Graceful degradation when all providers fail
     """
     
     def __init__(self):
@@ -84,10 +101,34 @@ class MultiProviderAIService:
         self.current_key_index = 0
         self._load_keys_from_env()
         
+        # Circuit breakers for each provider
+        self.circuit_breakers = {
+            ProviderType.GEMINI: CircuitBreaker("gemini"),
+            ProviderType.OPENROUTER: CircuitBreaker("openrouter")
+        }
+        
         # Statistics
         self.total_requests = 0
         self.failed_requests = 0
         self.last_provider_used: Optional[ProviderType] = None
+        
+        # Degradation tracking
+        self._degradation_manager = get_degradation_manager()
+        
+        # Retry configuration for AI calls
+        self.retry_config = RetryConfig(
+            max_attempts=2,  # 2 attempts per provider
+            base_delay=1.0,
+            max_delay=10.0,
+            jitter=True,
+            retryable_exceptions=[
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.NetworkError,
+                RateLimitError,
+                ServiceUnavailableError
+            ]
+        )
         
         logger.info(f"MultiProviderAIService initialized with {len(self.keys)} API keys")
         logger.info(f"  - Gemini keys: {len([k for k in self.keys if k.provider == ProviderType.GEMINI])}")
@@ -189,7 +230,7 @@ class MultiProviderAIService:
         temperature: float,
         max_tokens: Optional[int]
     ) -> Dict[str, Any]:
-        """Call Gemini API."""
+        """Call Gemini API with timeout and error handling."""
         config = self._get_provider_config(ProviderType.GEMINI)
         
         # Convert OpenAI-style messages to Gemini format
@@ -221,37 +262,54 @@ class MultiProviderAIService:
         url = f"{config.base_url}/models/{model}:generateContent?key={api_key.key}"
         
         async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
-            response = await client.post(
-                url,
-                headers=self._get_headers(api_key),
-                json=body
-            )
-            
-            if response.status_code == 429:
-                # Rate limited
-                api_key.rate_limit_reset = datetime.now() + timedelta(minutes=1)
-                raise RateLimitError(f"Gemini rate limited: {response.text}")
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            # Convert Gemini response to OpenAI-like format
-            candidates = data.get("candidates", [])
-            if candidates:
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                text = "".join(p.get("text", "") for p in parts)
+            try:
+                response = await client.post(
+                    url,
+                    headers=self._get_headers(api_key),
+                    json=body
+                )
                 
-                return {
-                    "choices": [{
-                        "message": {"content": text, "role": "assistant"},
-                        "finish_reason": "stop"
-                    }],
-                    "model": model,
-                    "provider": "gemini"
-                }
-            
-            raise ValueError(f"No candidates in Gemini response: {data}")
+                # Handle rate limiting
+                if response.status_code == 429:
+                    reset_time = datetime.now() + timedelta(minutes=1)
+                    api_key.rate_limit_reset = reset_time
+                    raise RateLimitError(f"Gemini rate limited until {reset_time}")
+                
+                # Handle service unavailable
+                if response.status_code >= 500:
+                    raise ServiceUnavailableError(f"Gemini returned {response.status_code}")
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                # Check for blocked content
+                if data.get("promptFeedback", {}).get("blockReason"):
+                    raise ContentBlockedError(
+                        f"Content blocked: {data['promptFeedback']['blockReason']}"
+                    )
+                
+                # Convert Gemini response to OpenAI-like format
+                candidates = data.get("candidates", [])
+                if candidates:
+                    content = candidates[0].get("content", {})
+                    parts = content.get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts)
+                    
+                    return {
+                        "choices": [{
+                            "message": {"content": text, "role": "assistant"},
+                            "finish_reason": "stop"
+                        }],
+                        "model": model,
+                        "provider": "gemini"
+                    }
+                
+                raise ValueError(f"No candidates in Gemini response: {data}")
+                
+            except httpx.TimeoutException:
+                raise TimeoutError(f"Gemini request timed out after {config.timeout_seconds}s")
+            except httpx.ConnectError as e:
+                raise ServiceUnavailableError(f"Cannot connect to Gemini: {e}")
     
     async def _call_openrouter(
         self,
@@ -261,7 +319,7 @@ class MultiProviderAIService:
         temperature: float,
         max_tokens: Optional[int]
     ) -> Dict[str, Any]:
-        """Call OpenRouter API."""
+        """Call OpenRouter API with timeout and error handling."""
         config = self._get_provider_config(ProviderType.OPENROUTER)
         
         body = {
@@ -276,21 +334,32 @@ class MultiProviderAIService:
         url = f"{config.base_url}/chat/completions"
         
         async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
-            response = await client.post(
-                url,
-                headers=self._get_headers(api_key),
-                json=body
-            )
-            
-            if response.status_code == 429:
-                # Rate limited
-                api_key.rate_limit_reset = datetime.now() + timedelta(minutes=1)
-                raise RateLimitError(f"OpenRouter rate limited: {response.text}")
-            
-            response.raise_for_status()
-            data = response.json()
-            data["provider"] = "openrouter"
-            return data
+            try:
+                response = await client.post(
+                    url,
+                    headers=self._get_headers(api_key),
+                    json=body
+                )
+                
+                # Handle rate limiting
+                if response.status_code == 429:
+                    reset_time = datetime.now() + timedelta(minutes=1)
+                    api_key.rate_limit_reset = reset_time
+                    raise RateLimitError(f"OpenRouter rate limited until {reset_time}")
+                
+                # Handle service unavailable
+                if response.status_code >= 500:
+                    raise ServiceUnavailableError(f"OpenRouter returned {response.status_code}")
+                
+                response.raise_for_status()
+                data = response.json()
+                data["provider"] = "openrouter"
+                return data
+                
+            except httpx.TimeoutException:
+                raise TimeoutError(f"OpenRouter request timed out after {config.timeout_seconds}s")
+            except httpx.ConnectError as e:
+                raise ServiceUnavailableError(f"Cannot connect to OpenRouter: {e}")
     
     async def chat_completion(
         self,
@@ -302,18 +371,13 @@ class MultiProviderAIService:
         fallback_providers: bool = True
     ) -> Dict[str, Any]:
         """
-        Send a chat completion request, trying providers with automatic fallback.
+        Send a chat completion request with full resilience patterns.
         
-        Args:
-            messages: List of message dicts with role and content
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            model: Specific model to use (uses default if None)
-            preferred_provider: Try this provider first
-            fallback_providers: Whether to try other providers on failure
-        
-        Returns:
-            Response dict with choices, model, and provider info
+        Features:
+        - Circuit breaker protection
+        - Retry with exponential backoff per provider
+        - Automatic failover between providers
+        - Graceful degradation when all fail
         """
         self.total_requests += 1
         
@@ -327,20 +391,29 @@ class MultiProviderAIService:
                     providers_to_try.append(provider)
         
         last_error = None
+        errors_by_provider = {}
         
         for provider in providers_to_try:
             config = self._get_provider_config(provider)
             model_to_use = model or config.default_model
             
-            # Try up to 3 different keys for this provider
-            for attempt in range(3):
+            # Check circuit breaker
+            breaker = self.circuit_breakers[provider]
+            if breaker.is_open:
+                logger.warning(f"Circuit breaker open for {provider.value}, skipping")
+                errors_by_provider[provider.value] = "circuit_breaker_open"
+                continue
+            
+            # Try with retry logic
+            for attempt in range(self.retry_config.max_attempts):
                 api_key = self._get_next_key(provider)
                 if not api_key:
                     logger.warning(f"No available keys for {provider.value}")
+                    errors_by_provider[provider.value] = "no_keys_available"
                     break
                 
                 try:
-                    logger.debug(f"Trying {api_key.name} with {model_to_use}")
+                    logger.debug(f"Trying {api_key.name} with {model_to_use} (attempt {attempt + 1})")
                     
                     if provider == ProviderType.GEMINI:
                         result = await self._call_gemini(
@@ -355,6 +428,10 @@ class MultiProviderAIService:
                     api_key.last_used = datetime.now()
                     api_key.request_count += 1
                     self.last_provider_used = provider
+                    breaker.record_success()
+                    
+                    # Clear degradation flag if it was set
+                    self._degradation_manager.restore("ai_service")
                     
                     logger.info(f"Success with {api_key.name} using {model_to_use}")
                     return result
@@ -363,19 +440,60 @@ class MultiProviderAIService:
                     logger.warning(f"Rate limit hit for {api_key.name}: {e}")
                     api_key.error_count += 1
                     last_error = e
-                    # Try next key
+                    errors_by_provider[provider.value] = f"rate_limited:{api_key.name}"
                     
-                except Exception as e:
-                    logger.error(f"Error with {api_key.name}: {e}")
+                    # Don't retry immediately on rate limit, try next key
+                    await asyncio.sleep(self.retry_config.calculate_delay(attempt))
+                    
+                except (TimeoutError, ServiceUnavailableError) as e:
+                    logger.warning(f"Transient error with {api_key.name}: {e}")
                     api_key.error_count += 1
                     last_error = e
-                    # Try next key
+                    errors_by_provider[provider.value] = f"{type(e).__name__}:{api_key.name}"
+                    
+                    # Calculate backoff delay
+                    delay = self.retry_config.calculate_delay(attempt)
+                    if attempt < self.retry_config.max_attempts - 1:
+                        logger.info(f"Retrying in {delay:.1f}s...")
+                        await asyncio.sleep(delay)
+                    
+                except Exception as e:
+                    logger.error(f"Unexpected error with {api_key.name}: {e}")
+                    api_key.error_count += 1
+                    last_error = e
+                    errors_by_provider[provider.value] = f"unexpected:{type(e).__name__}"
+                    breaker.record_failure()
+                    # Don't retry on unexpected errors
+                    break
+            
+            # If we exhausted retries for this provider, record failure
+            if last_error:
+                breaker.record_failure()
         
         # All providers failed
         self.failed_requests += 1
-        error_msg = f"All AI providers failed. Last error: {last_error}"
-        logger.error(error_msg)
-        return {"error": error_msg, "choices": None}
+        
+        # Mark service as degraded
+        self._degradation_manager.mark_degraded(
+            "ai_service",
+            f"All AI providers failed: {errors_by_provider}",
+            fallback_available=True
+        )
+        
+        # Return structured error - this will be caught by error handler
+        error = ai_service_unavailable(
+            detail=f"Errors by provider: {errors_by_provider}"
+        )
+        
+        # Return error dict for backward compatibility
+        return {
+            "error": error.message,
+            "error_code": error.code,
+            "errors_by_provider": errors_by_provider,
+            "choices": None,
+            "retryable": True,
+            "retry_after": 30
+        }
     
     async def extract_structured_data(
         self,
@@ -386,17 +504,9 @@ class MultiProviderAIService:
         preferred_provider: Optional[ProviderType] = None
     ) -> Dict[str, Any]:
         """
-        Extract structured data from unstructured text.
+        Extract structured data with error handling.
         
-        Args:
-            text: Raw text to parse
-            schema: JSON schema describing expected output
-            instructions: Additional instructions for the model
-            temperature: Lower temperature for more deterministic extraction
-            preferred_provider: Preferred AI provider
-        
-        Returns:
-            Parsed structured data with success flag
+        Returns user-friendly errors for extraction failures.
         """
         system_prompt = f"""You are a data extraction assistant. Extract structured information from the provided text.
 
@@ -421,7 +531,14 @@ Important: Return ONLY the JSON object, no markdown formatting, no explanations.
         )
         
         if "error" in result:
-            return {"success": False, "error": result["error"]}
+            # Propagate error with context
+            return {
+                "success": False,
+                "error": result["error"],
+                "error_code": result.get("error_code", "AI_SERVICE_ERROR"),
+                "retryable": result.get("retryable", True),
+                "retry_after": result.get("retry_after", 30)
+            }
         
         try:
             content = result["choices"][0]["message"]["content"]
@@ -442,9 +559,17 @@ Important: Return ONLY the JSON object, no markdown formatting, no explanations.
                 "provider": result.get("provider"),
                 "model": result.get("model")
             }
+            
         except (KeyError, json.JSONDecodeError) as e:
             logger.error(f"Failed to parse extraction result: {e}")
-            return {"success": False, "error": f"Parsing failed: {e}"}
+            error = ai_extraction_failed("parse the extracted data")
+            return {
+                "success": False,
+                "error": error.message,
+                "error_code": error.code,
+                "retryable": True,
+                "suggested_action": error.suggested_action
+            }
     
     def get_stats(self) -> Dict[str, Any]:
         """Get usage statistics for all API keys."""
@@ -453,6 +578,10 @@ Important: Return ONLY the JSON object, no markdown formatting, no explanations.
             "failed_requests": self.failed_requests,
             "success_rate": 1 - (self.failed_requests / max(1, self.total_requests)),
             "last_provider_used": self.last_provider_used.value if self.last_provider_used else None,
+            "circuit_breakers": {
+                name: breaker.get_status()
+                for name, breaker in self.circuit_breakers.items()
+            },
             "keys": [
                 {
                     "name": k.name,
@@ -474,30 +603,61 @@ Important: Return ONLY the JSON object, no markdown formatting, no explanations.
         for provider in ProviderType:
             config = self._get_provider_config(provider)
             key = self._get_next_key(provider)
+            breaker = self.circuit_breakers[provider]
+            
+            if breaker.is_open:
+                results[provider.value] = {
+                    "status": "circuit_open",
+                    "available": False,
+                    "retry_after": breaker.config.recovery_timeout
+                }
+                continue
             
             if not key:
                 results[provider.value] = {"status": "no_keys", "available": False}
                 continue
             
             try:
-                # Quick health check with minimal request
+                # Quick health check with timeout
                 messages = [{"role": "user", "content": "Hi"}]
                 
                 if provider == ProviderType.GEMINI:
-                    await self._call_gemini(key, messages, config.default_model, 0.1, 10)
+                    await with_timeout(
+                        self._call_gemini(key, messages, config.default_model, 0.1, 10),
+                        timeout_seconds=10.0
+                    )
                 else:
-                    await self._call_openrouter(key, messages, config.default_model, 0.1, 10)
+                    await with_timeout(
+                        self._call_openrouter(key, messages, config.default_model, 0.1, 10),
+                        timeout_seconds=10.0
+                    )
                 
                 results[provider.value] = {"status": "healthy", "available": True}
+                breaker.record_success()
                 
+            except TimeoutError:
+                results[provider.value] = {"status": "timeout", "available": False}
+                breaker.record_failure()
             except Exception as e:
-                results[provider.value] = {"status": f"error: {str(e)}", "available": False}
+                results[provider.value] = {"status": f"error: {str(e)[:50]}", "available": False}
+                breaker.record_failure()
         
         return results
 
 
+# Custom exceptions for the AI service
 class RateLimitError(Exception):
     """Raised when an API key hits rate limits."""
+    pass
+
+
+class ServiceUnavailableError(Exception):
+    """Raised when service returns 5xx errors."""
+    pass
+
+
+class ContentBlockedError(Exception):
+    """Raised when content is blocked by the provider."""
     pass
 
 

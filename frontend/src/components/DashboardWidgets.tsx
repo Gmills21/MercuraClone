@@ -23,8 +23,9 @@ export const BusinessImpactWidget: React.FC<BusinessImpactWidgetProps> = ({
           Business Impact
         </h3>
         <button 
+          type="button"
           onClick={() => navigate('/impact')}
-          className="text-sm text-orange-600 hover:text-orange-700"
+          className="text-sm text-orange-600 hover:text-orange-700 cursor-pointer"
         >
           Details →
         </button>
@@ -69,8 +70,9 @@ export const CustomerIntelligenceWidget: React.FC<CustomerIntelligenceWidgetProp
           Customer Health
         </h3>
         <button 
+          type="button"
           onClick={() => navigate('/intelligence')}
-          className="text-sm text-orange-600 hover:text-orange-700"
+          className="text-sm text-orange-600 hover:text-orange-700 cursor-pointer"
         >
           Details →
         </button>

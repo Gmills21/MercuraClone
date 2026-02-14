@@ -7,6 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from typing import List, Optional
 
 from app.services.knowledge_base_service import get_knowledge_base_service, KnowledgeBaseService
+from app.security_utils import sanitize_filename
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-base"])
 
@@ -87,8 +88,12 @@ async def ingest_document(
             detail=f"Invalid doc_type. Must be one of: {', '.join(valid_types)}"
         )
     
-    # Save uploaded file temporarily
-    suffix = f".{file.filename.split('.')[-1]}" if '.' in file.filename else ""
+    # Sanitize filename and save uploaded file temporarily
+    safe_filename = sanitize_filename(file.filename)
+    if not safe_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    suffix = f".{safe_filename.split('.')[-1]}" if '.' in safe_filename else ""
     
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -98,7 +103,7 @@ async def ingest_document(
         
         # Prepare metadata
         metadata = {
-            "original_filename": file.filename,
+            "original_filename": safe_filename,
             "uploaded_at": str(__import__('datetime').datetime.now()),
         }
         if supplier:

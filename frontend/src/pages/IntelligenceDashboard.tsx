@@ -114,8 +114,9 @@ export const IntelligenceDashboard = () => {
               <p className="text-gray-600 mt-1">Understand your customers and take action</p>
             </div>
             <button
+              type="button"
               onClick={() => navigate('/customers')}
-              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
             >
               View All Customers
               <ArrowRight size={18} />
@@ -359,8 +360,9 @@ export const IntelligenceDashboard = () => {
                 {categories.active.length > 5 && (
                   <div className="px-6 py-3 text-center">
                     <button 
+                      type="button"
                       onClick={() => navigate('/customers')}
-                      className="text-sm text-orange-600 font-medium hover:text-orange-700"
+                      className="text-sm text-orange-600 font-medium hover:text-orange-700 cursor-pointer"
                     >
                       View {categories.active.length - 5} more →
                     </button>
@@ -403,8 +405,9 @@ export const IntelligenceDashboard = () => {
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => navigate(`/quotes/new?customer=${customer.id}`)}
-                      className="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors"
+                      className="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors cursor-pointer"
                     >
                       Create First Quote
                     </button>

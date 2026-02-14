@@ -40,6 +40,13 @@ def get_db():
     """Context manager for database connections."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    
+    # Enable foreign key enforcement on every connection
+    conn.execute("PRAGMA foreign_keys = ON")
+    
+    # Enable WAL mode for better concurrency (if not already enabled)
+    conn.execute("PRAGMA journal_mode = WAL")
+    
     try:
         yield conn
     finally:
@@ -66,21 +73,33 @@ def init_db():
             )
         """)
         
-        # Create default admin user if no users exist
+        # Create default admin user if no users exist AND ADMIN_PASSWORD is set
         cursor.execute("SELECT COUNT(*) FROM users")
         if cursor.fetchone()[0] == 0:
-            import hashlib
-            import secrets
-            salt = secrets.token_hex(16)
-            pwdhash = hashlib.pbkdf2_hmac('sha256', 'admin123'.encode(), salt.encode(), 100000)
-            password_hash = salt + pwdhash.hex()
-            
-            now = datetime.utcnow().isoformat()
-            cursor.execute("""
-                INSERT INTO users (id, email, name, password_hash, role, company_id, created_at, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, ('admin-001', 'admin@openmercura.local', 'System Admin', password_hash, 'admin', 'default', now, 1))
-            logger.info("Created default admin user: admin@openmercura.local / admin123")
+            import os
+            admin_password = os.getenv("ADMIN_PASSWORD")
+            if admin_password:
+                # Use the auth module's password hashing if available
+                try:
+                    from app.auth import _hash_password
+                    password_hash = _hash_password(admin_password)
+                except ImportError:
+                    # Fallback hashing
+                    import hashlib
+                    import secrets
+                    salt = secrets.token_hex(32)
+                    pwdhash = hashlib.pbkdf2_hmac('sha256', admin_password.encode('utf-8'), salt.encode('utf-8'), 600000)
+                    password_hash = f"pbkdf2:${salt}${pwdhash.hex()}"
+                
+                now = datetime.utcnow().isoformat()
+                admin_email = os.getenv("ADMIN_EMAIL", "admin@openmercura.local")
+                cursor.execute("""
+                    INSERT INTO users (id, email, name, password_hash, role, company_id, created_at, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, ('admin-001', admin_email, 'System Admin', password_hash, 'admin', 'default', now, 1))
+                logger.info(f"Created default admin user: {admin_email}")
+            else:
+                logger.warning("No users exist and ADMIN_PASSWORD not set. Create first user via /auth/register")
         
         # Customers table
         cursor.execute("""
@@ -369,26 +388,177 @@ def init_db():
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_org ON customers (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_email ON customers (email)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_org ON products (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_org ON quotes (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_customer ON quotes (customer_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items (quote_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitors_url ON competitors (url)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents (type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_project ON quotes (project_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quotes_assigned_user ON quotes (assigned_user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items (quote_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_quote_items_product ON quote_items (product_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitors_org ON competitors (organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitors_url ON competitors (url)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_org ON documents (organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents (type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_extractions_org ON extractions (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects (organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_org ON inbound_emails(organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_status ON inbound_emails(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_inbound_emails_msgid ON inbound_emails(message_id)")
+        
+        # Email Settings table (per organization)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS email_settings (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL UNIQUE,
+                smtp_host TEXT DEFAULT 'smtp.gmail.com',
+                smtp_port INTEGER DEFAULT 587,
+                smtp_username TEXT,
+                smtp_password TEXT,
+                from_email TEXT,
+                from_name TEXT DEFAULT 'Mercura',
+                use_tls INTEGER DEFAULT 1,
+                is_enabled INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_settings_org ON email_settings(organization_id)")
+        
+        # Alerts table (per organization)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                user_id TEXT,
+                alert_type TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                action_link TEXT,
+                action_text TEXT,
+                related_entity_type TEXT,
+                related_entity_id TEXT,
+                is_read INTEGER DEFAULT 0,
+                is_dismissed INTEGER DEFAULT 0,
+                read_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_org ON alerts(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_unread ON alerts(organization_id, is_read, is_dismissed)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(alert_type, related_entity_id)")
+        
+        # Subscriptions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL UNIQUE,
+                paddle_subscription_id TEXT,
+                paddle_customer_id TEXT,
+                plan_id TEXT NOT NULL,
+                plan_name TEXT,
+                status TEXT NOT NULL DEFAULT 'trial',
+                seats_total INTEGER NOT NULL DEFAULT 1,
+                seats_used INTEGER NOT NULL DEFAULT 0,
+                price_per_seat REAL NOT NULL,
+                total_amount REAL NOT NULL DEFAULT 0,
+                billing_interval TEXT NOT NULL DEFAULT 'monthly',
+                current_period_start TEXT,
+                current_period_end TEXT,
+                trial_ends_at TEXT,
+                cancel_at_period_end INTEGER DEFAULT 0,
+                canceled_at TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_org ON subscriptions(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_paddle ON subscriptions(paddle_subscription_id)")
+        
+        # Invoices table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS invoices (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                subscription_id TEXT,
+                paddle_payment_id TEXT,
+                invoice_number TEXT,
+                amount REAL NOT NULL,
+                currency TEXT NOT NULL DEFAULT 'USD',
+                status TEXT NOT NULL,
+                paid_at TEXT,
+                period_start TEXT,
+                period_end TEXT,
+                receipt_url TEXT,
+                pdf_url TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_org ON invoices(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_subscription ON invoices(subscription_id)")
+        
+        # Seat assignments table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS seat_assignments (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                subscription_id TEXT NOT NULL,
+                user_id TEXT,
+                email TEXT NOT NULL,
+                name TEXT,
+                is_active INTEGER DEFAULT 1,
+                assigned_at TEXT NOT NULL,
+                last_login_at TEXT,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_org ON seat_assignments(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_subscription ON seat_assignments(subscription_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_user ON seat_assignments(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_email ON seat_assignments(email)")
+        
+        # Custom Domains table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS custom_domains (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL UNIQUE,
+                domain TEXT UNIQUE NOT NULL,
+                status TEXT CHECK (status IN ('pending', 'verified', 'active', 'failed', 'deleted')) DEFAULT 'pending',
+                verification_token TEXT NOT NULL,
+                dns_records TEXT NOT NULL,
+                ssl_status TEXT CHECK (ssl_status IN ('pending', 'active', 'failed')) DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                verified_at TEXT,
+                metadata TEXT,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom_domains_domain ON custom_domains(domain)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom_domains_status ON custom_domains(status)")
         
         # Organization indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_org ON organization_invitations(organization_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_invited_by ON organization_invitations(invited_by)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_email ON organization_invitations(email)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_org_invites_token ON organization_invitations(token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_org ON sessions(organization_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_user ON password_reset_tokens(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token)")
         
         conn.commit()
@@ -927,6 +1097,18 @@ def get_integration_secret(organization_id: str, integration_type: str) -> Optio
         return row["encrypted_data"] if row else None
 
 
+def delete_integration_secret(organization_id: str, integration_type: str) -> bool:
+    """Delete integration secret."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM integration_secrets WHERE organization_id = ? AND integration_type = ?",
+            (organization_id, integration_type)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 # Project operations
 def create_project(project: Dict[str, Any]) -> bool:
     """Create a new project."""
@@ -1152,6 +1334,693 @@ def get_organization_by_slug(slug: str) -> Optional[Dict[str, Any]]:
         cursor.execute("SELECT * FROM organizations WHERE slug = ?", (slug,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+
+def get_organization(organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get organization by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM organizations WHERE id = ?", (organization_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["settings"] = json.loads(data.get("settings", "{}"))
+            data["branding"] = json.loads(data.get("branding", "{}"))
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+# Email Settings CRUD
+def get_email_settings(organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get email settings for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM email_settings WHERE organization_id = ?", (organization_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def create_or_update_email_settings(
+    organization_id: str,
+    smtp_host: str = 'smtp.gmail.com',
+    smtp_port: int = 587,
+    smtp_username: str = '',
+    smtp_password: str = '',
+    from_email: str = '',
+    from_name: str = 'Mercura',
+    use_tls: bool = True,
+    is_enabled: bool = False
+) -> Dict[str, Any]:
+    """Create or update email settings for an organization."""
+    import uuid
+    now = datetime.utcnow().isoformat()
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Check if settings exist
+        cursor.execute("SELECT id FROM email_settings WHERE organization_id = ?", (organization_id,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update
+            cursor.execute("""
+                UPDATE email_settings SET
+                    smtp_host = ?,
+                    smtp_port = ?,
+                    smtp_username = ?,
+                    smtp_password = ?,
+                    from_email = ?,
+                    from_name = ?,
+                    use_tls = ?,
+                    is_enabled = ?,
+                    updated_at = ?
+                WHERE organization_id = ?
+            """, (
+                smtp_host, smtp_port, smtp_username, smtp_password,
+                from_email or smtp_username, from_name, int(use_tls), int(is_enabled),
+                now, organization_id
+            ))
+        else:
+            # Create
+            settings_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO email_settings (
+                    id, organization_id, smtp_host, smtp_port, smtp_username,
+                    smtp_password, from_email, from_name, use_tls, is_enabled,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                settings_id, organization_id, smtp_host, smtp_port, smtp_username,
+                smtp_password, from_email or smtp_username, from_name, int(use_tls), int(is_enabled),
+                now, now
+            ))
+        
+        conn.commit()
+        return get_email_settings(organization_id) or {}
+
+
+def delete_email_settings(organization_id: str) -> bool:
+    """Delete email settings for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM email_settings WHERE organization_id = ?", (organization_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# Alerts CRUD
+def create_alert(alert: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Create a new alert."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO alerts (
+                    id, organization_id, user_id, alert_type, priority, title, message,
+                    action_link, action_text, related_entity_type, related_entity_id,
+                    is_read, is_dismissed, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+            """, (
+                alert["id"],
+                alert["organization_id"],
+                alert.get("user_id"),
+                alert["alert_type"],
+                alert["priority"],
+                alert["title"],
+                alert["message"],
+                alert.get("action_link"),
+                alert.get("action_text"),
+                alert.get("related_entity_type"),
+                alert.get("related_entity_id"),
+                alert["created_at"]
+            ))
+            conn.commit()
+            return get_alert(alert["id"], alert["organization_id"])
+    except Exception as e:
+        logger.error(f"Failed to create alert: {e}")
+        return None
+
+
+def get_alert(alert_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get a specific alert."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM alerts WHERE id = ? AND organization_id = ?
+        """, (alert_id, organization_id))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def list_alerts(
+    organization_id: str,
+    user_id: Optional[str] = None,
+    unread_only: bool = False,
+    limit: int = 50,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+    """List alerts for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM alerts WHERE organization_id = ? AND is_dismissed = 0"
+        params = [organization_id]
+        
+        if user_id:
+            query += " AND (user_id = ? OR user_id IS NULL)"
+            params.append(user_id)
+        
+        if unread_only:
+            query += " AND is_read = 0"
+        
+        query += " ORDER BY CASE WHEN priority = 'high' THEN 0 ELSE 1 END, created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_unread_alert_count(organization_id: str, user_id: Optional[str] = None) -> int:
+    """Get count of unread alerts."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = "SELECT COUNT(*) as count FROM alerts WHERE organization_id = ? AND is_read = 0 AND is_dismissed = 0"
+        params = [organization_id]
+        
+        if user_id:
+            query += " AND (user_id = ? OR user_id IS NULL)"
+            params.append(user_id)
+        
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return row["count"] if row else 0
+
+
+def mark_alert_read(alert_id: str, organization_id: str) -> bool:
+    """Mark an alert as read."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        cursor.execute("""
+            UPDATE alerts SET is_read = 1, read_at = ? 
+            WHERE id = ? AND organization_id = ?
+        """, (now, alert_id, organization_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def mark_all_alerts_read(organization_id: str, user_id: Optional[str] = None) -> int:
+    """Mark all alerts as read."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        
+        query = "UPDATE alerts SET is_read = 1, read_at = ? WHERE organization_id = ? AND is_read = 0"
+        params = [now, organization_id]
+        
+        if user_id:
+            query += " AND (user_id = ? OR user_id IS NULL)"
+            params.append(user_id)
+        
+        cursor.execute(query, params)
+        conn.commit()
+        return cursor.rowcount
+
+
+def dismiss_alert(alert_id: str, organization_id: str) -> bool:
+    """Dismiss/delete an alert."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE alerts SET is_dismissed = 1 
+            WHERE id = ? AND organization_id = ?
+        """, (alert_id, organization_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def alert_exists(organization_id: str, alert_type: str, related_entity_id: str, unread_only: bool = True) -> bool:
+    """Check if an alert already exists for an entity."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT 1 FROM alerts 
+            WHERE organization_id = ? AND alert_type = ? AND related_entity_id = ?
+        """
+        params = [organization_id, alert_type, related_entity_id]
+        
+        if unread_only:
+            query += " AND is_read = 0 AND is_dismissed = 0"
+        
+        cursor.execute(query, params)
+        return cursor.fetchone() is not None
+
+
+def auto_resolve_alerts(organization_id: str) -> int:
+    """Auto-resolve alerts when conditions change."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        
+        # Get follow-up alerts for quotes that are no longer 'sent'
+        cursor.execute("""
+            SELECT a.id, a.related_entity_id FROM alerts a
+            WHERE a.organization_id = ? 
+            AND a.alert_type = 'follow_up_needed'
+            AND a.is_read = 0 
+            AND a.is_dismissed = 0
+        """, (organization_id,))
+        
+        alerts_to_check = cursor.fetchall()
+        resolved_count = 0
+        
+        for alert in alerts_to_check:
+            quote_id = alert["related_entity_id"]
+            # Check if quote status changed
+            cursor.execute("SELECT status FROM quotes WHERE id = ?", (quote_id,))
+            quote_row = cursor.fetchone()
+            
+            if quote_row and quote_row["status"] != "sent":
+                # Auto-resolve
+                cursor.execute("""
+                    UPDATE alerts SET is_read = 1, read_at = ? 
+                    WHERE id = ?
+                """, (now, alert["id"]))
+                resolved_count += 1
+        
+        conn.commit()
+        return resolved_count
+
+
+# Subscription CRUD
+def get_subscription(organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get subscription for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM subscriptions WHERE organization_id = ?", (organization_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def get_subscription_by_paddle_id(paddle_subscription_id: str) -> Optional[Dict[str, Any]]:
+    """Get subscription by Paddle subscription ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM subscriptions WHERE paddle_subscription_id = ?", (paddle_subscription_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def create_subscription(subscription: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Create a new subscription."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+                INSERT INTO subscriptions (
+                    id, organization_id, paddle_subscription_id, paddle_customer_id,
+                    plan_id, plan_name, status, seats_total, seats_used,
+                    price_per_seat, total_amount, billing_interval,
+                    current_period_start, current_period_end, trial_ends_at,
+                    metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                subscription["id"],
+                subscription["organization_id"],
+                subscription.get("paddle_subscription_id"),
+                subscription.get("paddle_customer_id"),
+                subscription["plan_id"],
+                subscription.get("plan_name"),
+                subscription.get("status", "active"),
+                subscription.get("seats_total", 1),
+                subscription.get("seats_used", 0),
+                subscription.get("price_per_seat", 0),
+                subscription.get("total_amount", 0),
+                subscription.get("billing_interval", "monthly"),
+                subscription.get("current_period_start"),
+                subscription.get("current_period_end"),
+                subscription.get("trial_ends_at"),
+                json.dumps(subscription.get("metadata", {})),
+                now,
+                now
+            ))
+            conn.commit()
+            return get_subscription(subscription["organization_id"])
+    except Exception as e:
+        logger.error(f"Failed to create subscription: {e}")
+        return None
+
+
+def update_subscription(organization_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Update subscription fields."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            
+            # Build update query
+            allowed_fields = [
+                "paddle_subscription_id", "paddle_customer_id", "plan_id", "plan_name",
+                "status", "seats_total", "seats_used", "price_per_seat", "total_amount",
+                "billing_interval", "current_period_start", "current_period_end",
+                "trial_ends_at", "cancel_at_period_end", "canceled_at"
+            ]
+            
+            fields = []
+            values = []
+            for field in allowed_fields:
+                if field in updates:
+                    fields.append(f"{field} = ?")
+                    values.append(updates[field])
+            
+            if not fields:
+                return get_subscription(organization_id)
+            
+            fields.append("updated_at = ?")
+            values.append(now)
+            values.append(organization_id)
+            
+            cursor.execute(f"""
+                UPDATE subscriptions SET {', '.join(fields)}
+                WHERE organization_id = ?
+            """, values)
+            conn.commit()
+            return get_subscription(organization_id)
+    except Exception as e:
+        logger.error(f"Failed to update subscription: {e}")
+        return None
+
+
+def delete_subscription(organization_id: str) -> bool:
+    """Delete a subscription."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM subscriptions WHERE organization_id = ?", (organization_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# Invoice CRUD
+def create_invoice(invoice: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Create a new invoice."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+                INSERT INTO invoices (
+                    id, organization_id, subscription_id, paddle_payment_id,
+                    invoice_number, amount, currency, status, paid_at,
+                    period_start, period_end, receipt_url, pdf_url,
+                    metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                invoice["id"],
+                invoice["organization_id"],
+                invoice.get("subscription_id"),
+                invoice.get("paddle_payment_id"),
+                invoice.get("invoice_number"),
+                invoice["amount"],
+                invoice.get("currency", "USD"),
+                invoice.get("status", "pending"),
+                invoice.get("paid_at"),
+                invoice.get("period_start"),
+                invoice.get("period_end"),
+                invoice.get("receipt_url"),
+                invoice.get("pdf_url"),
+                json.dumps(invoice.get("metadata", {})),
+                now
+            ))
+            conn.commit()
+            return get_invoice(invoice["id"], invoice["organization_id"])
+    except Exception as e:
+        logger.error(f"Failed to create invoice: {e}")
+        return None
+
+
+def get_invoice(invoice_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get a specific invoice."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM invoices WHERE id = ? AND organization_id = ?
+        """, (invoice_id, organization_id))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def list_invoices(organization_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """List invoices for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM invoices WHERE organization_id = ?
+            ORDER BY created_at DESC LIMIT ?
+        """, (organization_id, limit))
+        results = []
+        for row in cursor.fetchall():
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            results.append(data)
+        return results
+
+
+def update_invoice_status(invoice_id: str, organization_id: str, status: str, paid_at: Optional[str] = None) -> bool:
+    """Update invoice status."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if paid_at:
+            cursor.execute("""
+                UPDATE invoices SET status = ?, paid_at = ?
+                WHERE id = ? AND organization_id = ?
+            """, (status, paid_at, invoice_id, organization_id))
+        else:
+            cursor.execute("""
+                UPDATE invoices SET status = ?
+                WHERE id = ? AND organization_id = ?
+            """, (status, invoice_id, organization_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# Seat Assignment CRUD
+def create_seat_assignment(assignment: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Create a seat assignment."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+                INSERT INTO seat_assignments (
+                    id, organization_id, subscription_id, user_id,
+                    email, name, is_active, assigned_at, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """, (
+                assignment["id"],
+                assignment["organization_id"],
+                assignment["subscription_id"],
+                assignment.get("user_id"),
+                assignment["email"],
+                assignment.get("name"),
+                now,
+                json.dumps(assignment.get("metadata", {}))
+            ))
+            # Update seats_used in same transaction to avoid partial state on crash
+            cursor.execute("""
+                UPDATE subscriptions 
+                SET seats_used = (SELECT COUNT(*) FROM seat_assignments 
+                                  WHERE organization_id = ? AND is_active = 1)
+                WHERE organization_id = ?
+            """, (assignment["organization_id"], assignment["organization_id"]))
+            conn.commit()
+            return get_seat_assignment(assignment["id"], assignment["organization_id"])
+    except Exception as e:
+        logger.error(f"Failed to create seat assignment: {e}")
+        return None
+
+
+def get_seat_assignment(assignment_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get a specific seat assignment."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM seat_assignments WHERE id = ? AND organization_id = ?
+        """, (assignment_id, organization_id))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def list_seat_assignments(organization_id: str, active_only: bool = True) -> List[Dict[str, Any]]:
+    """List seat assignments for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM seat_assignments WHERE organization_id = ?"
+        params = [organization_id]
+        if active_only:
+            query += " AND is_active = 1"
+        query += " ORDER BY assigned_at DESC"
+        cursor.execute(query, params)
+        results = []
+        for row in cursor.fetchall():
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            results.append(data)
+        return results
+
+
+def deactivate_seat(assignment_id: str, organization_id: str) -> bool:
+    """Deactivate a seat assignment."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE seat_assignments SET is_active = 0
+            WHERE id = ? AND organization_id = ?
+        """, (assignment_id, organization_id))
+        rows_updated = cursor.rowcount
+        # Update seats_used in same transaction to avoid partial state on crash
+        cursor.execute("""
+            UPDATE subscriptions 
+            SET seats_used = (SELECT COUNT(*) FROM seat_assignments 
+                              WHERE organization_id = ? AND is_active = 1)
+            WHERE organization_id = ?
+        """, (organization_id, organization_id))
+        conn.commit()
+        return rows_updated > 0
+
+
+# ========== CUSTOM DOMAIN OPERATIONS ==========
+
+def get_organization_by_custom_domain(domain: str) -> Optional[Dict[str, Any]]:
+    """Get organization by custom domain."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.* FROM organizations o
+            JOIN custom_domains cd ON o.id = cd.organization_id
+            WHERE cd.domain = ? AND cd.status = 'active'
+        """, (domain.lower(),))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["settings"] = json.loads(data.get("settings", "{}"))
+            data["branding"] = json.loads(data.get("branding", "{}"))
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def get_custom_domain(organization_id: str) -> Optional[Dict[str, Any]]:
+    """Get custom domain for an organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM custom_domains 
+            WHERE organization_id = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (organization_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data["dns_records"] = json.loads(data.get("dns_records", "[]"))
+            data["metadata"] = json.loads(data.get("metadata", "{}"))
+            return data
+        return None
+
+
+def create_custom_domain(domain_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Create a custom domain entry."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+                INSERT INTO custom_domains (
+                    id, organization_id, domain, status,
+                    verification_token, dns_records, ssl_status,
+                    created_at, updated_at, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                domain_data["id"],
+                domain_data["organization_id"],
+                domain_data["domain"].lower(),
+                domain_data.get("status", "pending"),
+                domain_data.get("verification_token"),
+                json.dumps(domain_data.get("dns_records", [])),
+                domain_data.get("ssl_status", "pending"),
+                now,
+                now,
+                json.dumps(domain_data.get("metadata", {}))
+            ))
+            conn.commit()
+            return get_custom_domain(domain_data["organization_id"])
+    except sqlite3.IntegrityError as e:
+        logger.error(f"Custom domain creation failed: {e}")
+        return None
+
+
+def update_custom_domain_status(
+    organization_id: str, 
+    status: str, 
+    ssl_status: Optional[str] = None
+) -> bool:
+    """Update custom domain verification status."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        if ssl_status:
+            cursor.execute("""
+                UPDATE custom_domains 
+                SET status = ?, ssl_status = ?, updated_at = ?, verified_at = ?
+                WHERE organization_id = ?
+            """, (status, ssl_status, now, now, organization_id))
+        else:
+            cursor.execute("""
+                UPDATE custom_domains 
+                SET status = ?, updated_at = ?, verified_at = ?
+                WHERE organization_id = ? AND status != 'active'
+            """, (status, now, now, organization_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_custom_domain(organization_id: str) -> bool:
+    """Remove custom domain from organization."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM custom_domains WHERE organization_id = ?
+        """, (organization_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def check_domain_exists(domain: str) -> bool:
+    """Check if a domain is already registered by another org."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM custom_domains 
+            WHERE domain = ? AND status != 'deleted'
+        """, (domain.lower(),))
+        return cursor.fetchone()[0] > 0
 
 
 # Initialize on module load

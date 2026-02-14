@@ -15,10 +15,11 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "Mercura"
     app_env: str = "development"
-    debug: bool = True
+    debug: bool = False  # SECURITY: Never enable debug in production
     secret_key: str = ""  # Allow empty for startup, validate later
     host: str = "0.0.0.0"
     port: int = int(os.getenv("PORT", "8000"))  # Use PORT from Render, fallback to 8000
+    app_url: str = os.getenv("APP_URL", "http://localhost:8000")
     
     # Database
     database_url: str = "sqlite:///mercura.db"
@@ -58,6 +59,9 @@ class Settings(BaseSettings):
     paddle_vendor_id: Optional[str] = None
     paddle_webhook_secret: Optional[str] = None
     paddle_sandbox: bool = True
+    paddle_plan_basic: Optional[str] = None
+    paddle_plan_pro: Optional[str] = None
+    paddle_plan_enterprise: Optional[str] = None
     
     # QuickBooks
     qbo_client_id: Optional[str] = None
@@ -108,6 +112,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_file: str = "./logs/mercura.log"
+    
+    # Observability & Telemetry
+    sentry_dsn: Optional[str] = None  # Sentry error tracking DSN
+    app_version: str = "1.0.0"
     
     class Config:
         env_file = ".env"

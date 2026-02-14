@@ -2,8 +2,8 @@
 Quotes API routes using local SQLite.
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Header
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import uuid
@@ -16,6 +16,31 @@ from fastapi import Depends
 from app.middleware.organization import get_current_user_and_org
 from app.posthog_utils import capture_event
 
+# In-memory idempotency key store (use Redis in production)
+_idempotency_keys: Dict[str, datetime] = {}
+_IDEMPOTENCY_TTL_SECONDS = 300  # 5 minutes
+
+
+def _check_idempotency(key: str) -> bool:
+    """Check if idempotency key was already used. Returns True if duplicate."""
+    from app.utils.observability import logger
+    
+    now = datetime.utcnow()
+    
+    # Clean expired keys
+    expired = [k for k, v in _idempotency_keys.items() if (now - v).seconds > _IDEMPOTENCY_TTL_SECONDS]
+    for k in expired:
+        del _idempotency_keys[k]
+    
+    # Check if key exists
+    if key in _idempotency_keys:
+        logger.info(f"Duplicate idempotency key detected: {key[:16]}...")
+        return True
+    
+    # Store key
+    _idempotency_keys[key] = now
+    return False
+
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 
@@ -24,8 +49,22 @@ class QuoteItemCreate(BaseModel):
     product_name: Optional[str] = None
     sku: Optional[str] = None
     description: Optional[str] = None
-    quantity: float = 1
-    unit_price: float
+    quantity: float = Field(default=1, gt=0, description="Quantity must be greater than 0")
+    unit_price: float = Field(ge=0, description="Unit price must be non-negative")
+
+    @field_validator('quantity')
+    @classmethod
+    def validate_quantity(cls, v):
+        if v <= 0:
+            raise ValueError('Quantity must be greater than 0')
+        return v
+
+    @field_validator('unit_price')
+    @classmethod
+    def validate_unit_price(cls, v):
+        if v < 0:
+            raise ValueError('Unit price cannot be negative')
+        return v
 
 
 class QuoteCreate(BaseModel):
@@ -34,10 +73,24 @@ class QuoteCreate(BaseModel):
     assignee_id: Optional[str] = None
     inbound_email_id: Optional[str] = None
     items: List[QuoteItemCreate]
-    tax_rate: float = 0.0
+    tax_rate: float = Field(default=0.0, ge=0, le=100, description="Tax rate must be between 0 and 100")
     notes: Optional[str] = None
-    expires_days: int = 30
+    expires_days: int = Field(default=30, ge=1, le=365, description="Expiration must be between 1 and 365 days")
     metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator('tax_rate')
+    @classmethod
+    def validate_tax_rate(cls, v):
+        if v < 0 or v > 100:
+            raise ValueError('Tax rate must be between 0 and 100')
+        return v
+
+    @field_validator('expires_days')
+    @classmethod
+    def validate_expires_days(cls, v):
+        if v < 1 or v > 365:
+            raise ValueError('Expiration days must be between 1 and 365')
+        return v
 
 
 class QuoteItemResponse(BaseModel):
@@ -77,8 +130,17 @@ class QuoteResponse(BaseModel):
 @router.post("/", response_model=QuoteResponse)
 async def create_quote_endpoint(
     quote: QuoteCreate,
-    user_org: tuple = Depends(get_current_user_and_org)
+    user_org: tuple = Depends(get_current_user_and_org),
+    x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key")
 ):
+    """Create a new quote. Supports idempotency via X-Idempotency-Key header."""
+    
+    # Check idempotency key to prevent duplicate submissions
+    if x_idempotency_key and _check_idempotency(x_idempotency_key):
+        raise HTTPException(
+            status_code=409, 
+            detail="Duplicate submission detected. This quote has already been processed."
+        )
     """Create a new quote."""
     user_id, org_id = user_org
     # Validate customer exists

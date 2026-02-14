@@ -8,6 +8,7 @@ from datetime import datetime
 from app.services.extraction_engine import extraction_engine
 from app.database_sqlite import save_extraction, get_extraction
 from app.middleware.organization import get_current_user_and_org
+from app.security_utils import sanitize_filename
 
 router = APIRouter(prefix="/extract", tags=["extraction"])
 
@@ -28,13 +29,18 @@ async def extract_rfq(
     
     # Handle file upload
     if file:
+        # Sanitize filename to prevent path traversal
+        safe_filename = sanitize_filename(file.filename)
+        if not safe_filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
         # Validate file type
         allowed_extensions = [
             '.jpg', '.jpeg', '.png', '.webp', 
             '.pdf', '.xlsx', '.xls', '.csv',
             '.docx', '.pptx', '.html', '.htm', '.txt', '.md'
         ]
-        file_ext = os.path.splitext(file.filename)[1].lower()
+        file_ext = os.path.splitext(safe_filename)[1].lower()
         
         if file_ext not in allowed_extensions:
             raise HTTPException(
@@ -50,7 +56,7 @@ async def extract_rfq(
         # Universal extraction (handles image, pdf, xlsx)
         result = await extraction_engine.extract(
             file_data=file_data, 
-            filename=file.filename,
+            filename=safe_filename,
             source_type=source_type
         )
     
@@ -75,7 +81,7 @@ async def extract_rfq(
         "id": extraction_id,
         "organization_id": org_id,
         "source_type": source_type if not file else f"file:{file_ext[1:]}",
-        "source_content": text[:1000] if text else f"File: {file.filename}",
+        "source_content": text[:1000] if text else f"File: {safe_filename}",
         "parsed_data": structured_data,
         "confidence_score": result.get("confidence", 0.5),
         "status": "completed",
@@ -105,9 +111,14 @@ async def extract_and_create_quote(
     
     # Extract data
     if file:
+        # Sanitize filename
+        safe_filename = sanitize_filename(file.filename)
+        if not safe_filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
         extract_result = await extraction_engine.extract_from_image(
             await file.read(), 
-            file.filename
+            safe_filename
         )
     elif text:
         extract_result = await extraction_engine.extract_from_text(text, source_type)

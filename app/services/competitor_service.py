@@ -12,8 +12,26 @@ from dataclasses import dataclass
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from app.utils.resilience import (
+    with_retry,
+    RetryConfig,
+    CircuitBreaker,
+    CircuitBreakerOpen
+)
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for web scraping
+SCRAPING_RETRY_CONFIG = RetryConfig(
+    max_attempts=2,
+    base_delay=1.0,
+    max_delay=10.0,
+    retryable_exceptions=[
+        httpx.TimeoutException,
+        httpx.ConnectError,
+        httpx.NetworkError
+    ]
+)
 
 
 @dataclass
@@ -46,6 +64,8 @@ class CompetitorAnalysisService:
             "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
         }
+        self.circuit_breaker = CircuitBreaker("competitor_scraping")
+
         
     async def analyze_url(self, url: str) -> CompetitorData:
         """
@@ -60,8 +80,16 @@ class CompetitorAnalysisService:
         # Validate URL
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
-            
-        try:
+        
+        if self.circuit_breaker.is_open:
+            return CompetitorData(
+                url=url,
+                name=urlparse(url).netloc,
+                error="Competitor analysis temporarily unavailable due to recent errors"
+            )
+        
+        @self.circuit_breaker.protect
+        async def _fetch_and_parse():
             async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
                 response = await client.get(url)
                 
@@ -85,7 +113,7 @@ class CompetitorAnalysisService:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # Extract data
-                data = CompetitorData(
+                return CompetitorData(
                     url=url,
                     name=self._extract_name(soup, url),
                     title=self._extract_title(soup),
@@ -94,9 +122,9 @@ class CompetitorAnalysisService:
                     pricing=self._extract_pricing(soup),
                     features=self._extract_features(soup)
                 )
-                
-                return data
-                
+        
+        try:
+            return await with_retry(_fetch_and_parse, config=SCRAPING_RETRY_CONFIG)
         except httpx.TimeoutException:
             return CompetitorData(
                 url=url,
@@ -108,6 +136,12 @@ class CompetitorAnalysisService:
                 url=url,
                 name=urlparse(url).netloc,
                 error="Connection error - site may be down or blocking"
+            )
+        except CircuitBreakerOpen:
+            return CompetitorData(
+                url=url,
+                name=urlparse(url).netloc,
+                error="Competitor analysis temporarily unavailable"
             )
         except Exception as e:
             logger.error(f"Error analyzing {url}: {e}")
