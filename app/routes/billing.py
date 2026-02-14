@@ -16,13 +16,13 @@ from app.middleware.organization import get_current_user_and_org
 from app.database_sqlite import (
     get_subscription, create_subscription, update_subscription,
     list_invoices, get_invoice, list_seat_assignments,
-    create_seat_assignment, deactivate_seat
+    create_seat_assignment, deactivate_seat, save_cancellation_feedback,
 )
 from app.models_billing import (
     SubscriptionPlan, Subscription, Invoice,
     BillingInterval, CheckoutSessionRequest, UpdateSubscriptionRequest,
-    BillingPortalRequest, AssignSeatRequest, CheckoutSessionResponse,
-    BillingPortalResponse
+    CancelSubscriptionRequest, BillingPortalRequest, AssignSeatRequest,
+    CheckoutSessionResponse, BillingPortalResponse,
 )
 from app.errors import internal_error
 from app.dependencies import require_admin
@@ -258,17 +258,32 @@ async def update_subscription_endpoint(
 
 @router.post("/subscription/cancel")
 async def cancel_subscription(
-    cancel_at_period_end: bool = True,
+    body: Optional[CancelSubscriptionRequest] = None,
     user_org: tuple = Depends(require_admin)
 ):
-    """Cancel current subscription."""
+    """Cancel current subscription (self-service). Optional exit survey reason/feedback."""
     user_id, org_id = user_org
     
     subscription = get_subscription(org_id)
     if not subscription or not subscription.get("paddle_subscription_id"):
         raise HTTPException(status_code=404, detail="No active subscription found")
     
+    cancel_at_period_end = True
+    reason = None
+    feedback = None
+    if body:
+        cancel_at_period_end = body.cancel_at_period_end
+        reason = body.reason
+        feedback = body.feedback
+    
     try:
+        # Store exit survey before canceling (so we learn why they left)
+        save_cancellation_feedback(
+            organization_id=org_id,
+            subscription_id=subscription["id"],
+            reason=reason,
+            feedback_text=feedback,
+        )
         # Cancel safely via service
         result = await billing_service.cancel_subscription_safely(
             organization_id=org_id,
@@ -450,6 +465,47 @@ async def paddle_webhook(request: Request):
         logger.error(f"Error processing Paddle webhook: {e}")
         # Return 200 to prevent Paddle from retrying (we logged the error)
         return {"success": False, "error": "Internal server error processing webhook"}
+
+
+# ==================== BILLING STATUS ====================
+
+@router.get("/status")
+async def billing_status(user_org: tuple = Depends(get_current_user_and_org)):
+    """
+    Get billing status for the current organization.
+    Returns subscription state, billing config, and portal availability.
+    """
+    user_id, org_id = user_org
+
+    subscription = get_subscription(org_id)
+    is_configured = bool(
+        settings.paddle_vendor_id and settings.paddle_api_key and settings.paddle_plan_pro
+    )
+
+    if not subscription:
+        return {
+            "enabled": is_configured,
+            "status": "trial",
+            "plan_id": "trial",
+            "plan_name": "Free Trial",
+            "subscription": None,
+            "sandbox": settings.paddle_sandbox,
+        }
+
+    return {
+        "enabled": is_configured,
+        "status": subscription.get("status", "active"),
+        "plan_id": subscription.get("plan_id"),
+        "plan_name": subscription.get("plan_name"),
+        "subscription": {
+            "id": subscription.get("id"),
+            "organization_id": subscription.get("organization_id"),
+            "seats_total": subscription.get("seats_total"),
+            "seats_used": subscription.get("seats_used"),
+            "current_period_end": subscription.get("current_period_end"),
+        },
+        "sandbox": settings.paddle_sandbox,
+    }
 
 
 # Configuration check endpoint

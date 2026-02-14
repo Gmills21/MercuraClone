@@ -101,6 +101,13 @@ def init_db():
             else:
                 logger.warning("No users exist and ADMIN_PASSWORD not set. Create first user via /auth/register")
         
+        # Migration: add deleted_at for soft-delete (account deletion)
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "deleted_at" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN deleted_at TEXT")
+            logger.info("Added users.deleted_at for account soft-delete")
+        
         # Customers table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS customers (
@@ -525,6 +532,21 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_subscription ON seat_assignments(subscription_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_user ON seat_assignments(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_seats_email ON seat_assignments(email)")
+        
+        # Cancellation feedback (exit survey when user cancels subscription)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cancellation_feedback (
+                id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                subscription_id TEXT NOT NULL,
+                reason TEXT,
+                feedback_text TEXT,
+                canceled_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cancellation_feedback_org ON cancellation_feedback(organization_id)")
         
         # Custom Domains table
         cursor.execute("""
@@ -1638,6 +1660,38 @@ def get_subscription_by_paddle_id(paddle_subscription_id: str) -> Optional[Dict[
             data["metadata"] = json.loads(data.get("metadata", "{}"))
             return data
         return None
+
+
+def save_cancellation_feedback(
+    organization_id: str,
+    subscription_id: str,
+    reason: Optional[str] = None,
+    feedback_text: Optional[str] = None,
+) -> bool:
+    """Store exit survey feedback when a subscription is canceled."""
+    import uuid
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+                INSERT INTO cancellation_feedback (
+                    id, organization_id, subscription_id, reason, feedback_text, canceled_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                organization_id,
+                subscription_id,
+                reason or "",
+                feedback_text or "",
+                now,
+                now,
+            ))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to save cancellation feedback: {e}")
+        return False
 
 
 def create_subscription(subscription: Dict[str, Any]) -> Optional[Dict[str, Any]]:

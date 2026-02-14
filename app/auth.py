@@ -121,7 +121,10 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
     
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE email = ? AND is_active = 1", (email,))
+        cursor.execute(
+            "SELECT * FROM users WHERE email = ? AND is_active = 1 AND (deleted_at IS NULL OR deleted_at = '')",
+            (email,),
+        )
         row = cursor.fetchone()
         
         if row and verify_password(password, row["password_hash"]):
@@ -177,7 +180,10 @@ def get_current_user(token: str) -> Optional[User]:
     
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE id = ? AND is_active = 1", (user_id,))
+        cursor.execute(
+            "SELECT * FROM users WHERE id = ? AND is_active = 1 AND (deleted_at IS NULL OR deleted_at = '')",
+            (user_id,),
+        )
         row = cursor.fetchone()
         
         if row:

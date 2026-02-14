@@ -55,6 +55,7 @@ from app.routes import onboarding
 from app.routes import extraction_unified
 from app.routes import knowledge_base
 from app.routes import billing
+from app.routes import account
 from app.routes import organizations
 from app.routes import data
 from app.routes import ai_service
@@ -117,12 +118,13 @@ app.add_middleware(
     CSRFMiddleware,
     exempt_paths=[
         "/auth/login",
-        "/auth/register", 
+        "/auth/register",
         "/auth/logout",
         "/auth/refresh",
         "/webhooks/",
         "/quotes/token/",
         "/quotes/public/",
+        "/extract/",  # API extraction (also bypassed when using Bearer token)
         "/docs",
         "/redoc",
         "/openapi.json",
@@ -162,6 +164,7 @@ app.include_router(impact.router)
 app.include_router(onboarding.router)
 app.include_router(knowledge_base.router)  # Optional feature
 app.include_router(billing.router)  # B2B subscription management
+app.include_router(account.router)  # Account self-service (e.g. delete)
 app.include_router(organizations.router)  # Organization/team management
 app.include_router(data.router)  # Data/emails endpoints
 app.include_router(ai_service.router)  # AI service management

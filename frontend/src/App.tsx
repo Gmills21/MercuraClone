@@ -45,6 +45,8 @@ const EmailSettings = lazy(() => import('./pages/EmailSettings'));
 const CustomDomainSettings = lazy(() => import('./pages/CustomDomainSettings'));
 const CreateQuote = lazy(() => import('./pages/CreateQuote'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 
 // ============================================
 // ROUTE PRELOADING - eagerly load core pages on idle
@@ -311,6 +313,22 @@ function App() {
             element={
               <SuspenseWrapper type="cards">
                 <LandingPage />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/terms-of-service"
+            element={
+              <SuspenseWrapper type="cards">
+                <TermsOfService />
+              </SuspenseWrapper>
+            }
+          />
+          <Route
+            path="/privacy-policy"
+            element={
+              <SuspenseWrapper type="cards">
+                <PrivacyPolicy />
               </SuspenseWrapper>
             }
           />

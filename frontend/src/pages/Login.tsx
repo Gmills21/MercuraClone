@@ -13,10 +13,20 @@ export default function LoginPage() {
     const { login, isAuthenticated } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [deletedMessage, setDeletedMessage] = useState(false);
     const [formData, setFormData] = useState({
         email: '',
         password: '',
     });
+
+    // Show message if user just deactivated account
+    React.useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('deleted') === '1') {
+            setDeletedMessage(true);
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+    }, []);
 
     // Redirect if already authenticated
     React.useEffect(() => {
@@ -54,6 +64,11 @@ export default function LoginPage() {
 
                 {/* Form */}
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+                    {deletedMessage && (
+                        <div className="mb-4 p-4 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 text-sm">
+                            Your account has been deactivated. For full data removal, contact support.
+                        </div>
+                    )}
                     {error && (
                         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
                             {error}

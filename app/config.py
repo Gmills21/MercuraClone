@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     openrouter_api_key_8: Optional[str] = None
     openrouter_api_key_9: Optional[str] = None
     
+    # Moonshot AI (Kimi) - for document analysis/extraction
+    kimi_api_key: Optional[str] = None
+    kimi_base_url: str = "https://api.moonshot.ai/v1"
+    kimi_model: str = "moonshot-v1-32k"
+    
     # DeepSeek
     deepseek_api_key: Optional[str] = None
     deepseek_base_url: Optional[str] = None

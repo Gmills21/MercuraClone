@@ -165,6 +165,13 @@ class UpdateSubscriptionRequest(BaseModel):
     cancel_at_period_end: Optional[bool] = None
 
 
+class CancelSubscriptionRequest(BaseModel):
+    """Request to cancel subscription with optional exit survey."""
+    cancel_at_period_end: bool = True
+    reason: Optional[str] = Field(None, description="Predefined reason (e.g. too_expensive, missing_features)")
+    feedback: Optional[str] = Field(None, max_length=2000, description="Optional free-text feedback")
+
+
 class CheckoutSessionRequest(BaseModel):
     """Request to create a Paddle checkout session."""
     plan_id: str

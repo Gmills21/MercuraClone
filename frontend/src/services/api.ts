@@ -217,8 +217,12 @@ export const billingApi = {
     getPlans: () => api.get('/billing/plans'),
     getSubscription: () => api.get('/billing/subscription'),
     updateSubscription: (data: any) => api.post('/billing/subscription/update', data),
-    cancelSubscription: (cancelAtPeriodEnd: boolean = true) =>
-        api.post('/billing/subscription/cancel', { cancel_at_period_end: cancelAtPeriodEnd }),
+    cancelSubscription: (cancelAtPeriodEnd: boolean = true, reason?: string, feedback?: string) =>
+        api.post('/billing/subscription/cancel', {
+            cancel_at_period_end: cancelAtPeriodEnd,
+            ...(reason && { reason }),
+            ...(feedback && { feedback }),
+        }),
     createCheckoutSession: (data: any) => api.post('/billing/checkout/create-session', data),
     createBillingPortalSession: (returnUrl: string) =>
         api.post('/billing/portal/create-session', { return_url: returnUrl }),
@@ -238,6 +242,11 @@ export const quickbooksApi = {
 export const organizationsApi = {
     getMe: () => api.get('/organizations/me'),
     getMembers: (orgId: string) => api.get(`/organizations/${orgId}/members`),
+};
+
+// Account self-service (e.g. delete)
+export const accountApi = {
+    deleteAccount: () => api.post('/account/delete'),
 };
 
 export const erpApi = {

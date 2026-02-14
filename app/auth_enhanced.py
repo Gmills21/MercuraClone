@@ -11,7 +11,7 @@ from loguru import logger
 import json
 
 from app.database_sqlite import get_db
-from app.auth import _hash_password, _verify_password, User
+from app.auth import hash_password as _hash_password, verify_password as _verify_password, User
 
 
 class SessionService:

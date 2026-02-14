@@ -21,6 +21,41 @@ router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 # ==================== ORGANIZATION MANAGEMENT ====================
 
+@router.get("/")
+async def list_organizations(
+    authorization: Optional[str] = Header(None)
+):
+    """List organizations for the current user. Requires Bearer token."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+    token = authorization.replace("Bearer ", "")
+    session = SessionService.validate_session(token)
+
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    user_id = session["user_id"]
+    orgs = OrganizationService.list_user_organizations(user_id)
+
+    return {
+        "organizations": [
+            {
+                "id": org.id,
+                "name": org.name,
+                "slug": org.slug,
+                "status": org.status,
+                "seats_total": org.seats_total,
+                "seats_used": org.seats_used,
+                "trial_ends_at": org.trial_ends_at.isoformat() if org.trial_ends_at else None,
+                "created_at": org.created_at.isoformat(),
+            }
+            for org in orgs
+        ],
+        "count": len(orgs),
+    }
+
+
 @router.post("/create")
 async def create_organization(
     request: CreateOrganizationRequest,

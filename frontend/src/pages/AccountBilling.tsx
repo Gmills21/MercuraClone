@@ -4,7 +4,7 @@ import {
     CheckCircle, XCircle, Settings, Plus, Trash2, ExternalLink,
     TrendingUp, DollarSign, Package, Shield, Mail
 } from 'lucide-react';
-import { billingApi } from '../services/api';
+import { billingApi, accountApi } from '../services/api';
 
 interface SubscriptionPlan {
     id: string;
@@ -68,6 +68,16 @@ export const AccountBilling = () => {
     const [assignEmail, setAssignEmail] = useState('');
     const [assignName, setAssignName] = useState('');
     const [assignLoading, setAssignLoading] = useState(false);
+
+    // Cancel subscription exit survey modal
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelFeedback, setCancelFeedback] = useState('');
+    const [cancelLoading, setCancelLoading] = useState(false);
+
+    // Account deletion
+    const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+    const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
 
     useEffect(() => {
         loadBillingData();
@@ -164,14 +174,25 @@ export const AccountBilling = () => {
         }
     };
 
-    const handleCancelSubscription = async () => {
-        if (!confirm('Are you sure you want to cancel your subscription?')) return;
+    const handleCancelSubscriptionClick = () => {
+        setCancelReason('');
+        setCancelFeedback('');
+        setShowCancelModal(true);
+    };
 
+    const handleCancelSubscription = async () => {
         try {
-            await billingApi.cancelSubscription(true);
+            setCancelLoading(true);
+            await billingApi.cancelSubscription(true, cancelReason || undefined, cancelFeedback.trim() || undefined);
+            setShowCancelModal(false);
+            setCancelReason('');
+            setCancelFeedback('');
             await loadBillingData();
         } catch (error) {
             console.error('Failed to cancel subscription:', error);
+            alert('Failed to cancel subscription. Please try again or contact support.');
+        } finally {
+            setCancelLoading(false);
         }
     };
 
@@ -202,6 +223,23 @@ export const AccountBilling = () => {
             await loadBillingData();
         } catch (error) {
             console.error('Failed to deactivate seat:', error);
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        try {
+            setDeleteAccountLoading(true);
+            await accountApi.deleteAccount();
+            setShowDeleteAccountModal(false);
+            localStorage.removeItem('mercura_token');
+            localStorage.removeItem('mercura_user');
+            localStorage.removeItem('mercura_onboarding_required');
+            window.location.href = '/login?deleted=1';
+        } catch (error) {
+            console.error('Failed to delete account:', error);
+            alert('Failed to deactivate account. Please try again or contact support.');
+        } finally {
+            setDeleteAccountLoading(false);
         }
     };
 
@@ -399,7 +437,7 @@ export const AccountBilling = () => {
                                 </div>
 
                                 <button
-                                    onClick={handleCancelSubscription}
+                                    onClick={handleCancelSubscriptionClick}
                                     className="w-full p-4 text-left bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
                                 >
                                     <p className="font-medium text-red-900">Cancel Subscription</p>
@@ -409,6 +447,22 @@ export const AccountBilling = () => {
                         </div>
                     </div>
                 )}
+
+                {/* Danger zone: Delete account - same visibility as cancel (overview) */}
+                <div className="mt-8 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100">
+                        <h2 className="text-lg font-semibold text-gray-900">Account</h2>
+                        <p className="text-sm text-gray-600 mt-0.5">Deactivate your account. Billing and invoice data are retained for legal compliance.</p>
+                    </div>
+                    <div className="p-6">
+                        <button
+                            onClick={() => setShowDeleteAccountModal(true)}
+                            className="px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors text-sm font-medium"
+                        >
+                            Deactivate my account
+                        </button>
+                    </div>
+                </div>
 
                 {/* Plans Tab */}
                 {activeTab === 'plans' && (
@@ -612,6 +666,94 @@ export const AccountBilling = () => {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Cancel Subscription / Exit Survey Modal */}
+                {showCancelModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+                            <h3 className="text-xl font-semibold text-gray-900 mb-2">Cancel Subscription</h3>
+                            <p className="text-gray-600 mb-4">
+                                Your subscription will stay active until the end of the current billing period. Optional: tell us why you&apos;re leaving so we can improve.
+                            </p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+                                    <select
+                                        value={cancelReason}
+                                        onChange={(e) => setCancelReason(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    >
+                                        <option value="">Select a reason...</option>
+                                        <option value="too_expensive">Too expensive</option>
+                                        <option value="missing_features">Missing features I need</option>
+                                        <option value="switching">Switching to another tool</option>
+                                        <option value="not_using">Not using it enough</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Additional feedback (optional)</label>
+                                    <textarea
+                                        value={cancelFeedback}
+                                        onChange={(e) => setCancelFeedback(e.target.value)}
+                                        placeholder="Anything else we should know?"
+                                        rows={3}
+                                        maxLength={2000}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCancelModal(false)}
+                                        disabled={cancelLoading}
+                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                    >
+                                        Keep Subscription
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelSubscription}
+                                        disabled={cancelLoading}
+                                        className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                                    >
+                                        {cancelLoading ? 'Canceling...' : 'Cancel Subscription'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Delete account confirmation modal */}
+                {showDeleteAccountModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+                            <h3 className="text-xl font-semibold text-gray-900 mb-2">Deactivate account</h3>
+                            <p className="text-gray-600 mb-4">
+                                This will deactivate your account and log you out. You will not be able to sign in again. We retain billing and invoice data as required for compliance. For full data removal, contact support.
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDeleteAccountModal(false)}
+                                    disabled={deleteAccountLoading}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                >
+                                    Keep account
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteAccount}
+                                    disabled={deleteAccountLoading}
+                                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                                >
+                                    {deleteAccountLoading ? 'Deactivating...' : 'Deactivate account'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

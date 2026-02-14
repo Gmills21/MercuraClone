@@ -91,16 +91,21 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     def _is_exempt(self, request: Request) -> bool:
         """Check if request is exempt from CSRF validation."""
         path = request.url.path
-        
+
+        # API requests with Bearer token are exempt (programmatic access)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and len(auth) > 7:
+            return True
+
         # Check exempt paths
         for exempt in self.exempt_paths:
             if path.startswith(exempt):
                 return True
-        
+
         # Safe methods don't require CSRF
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
-            
+
         return False
     
     def _get_session_id(self, request: Request) -> str:
